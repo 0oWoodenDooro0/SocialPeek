@@ -18,10 +18,11 @@ class YouTubeResolverTest {
     private val resolver = YouTubeResolver()
 
     @Test
-    fun `canResolve should match youtube video, shorts, and youtu-be URLs`() {
+    fun `canResolve should match youtube video, shorts, live, and youtu-be URLs`() {
         assertTrue(resolver.canResolve("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
         assertTrue(resolver.canResolve("https://youtu.be/dQw4w9WgXcQ?si=123"))
         assertTrue(resolver.canResolve("https://www.youtube.com/shorts/dQw4w9WgXcQ"))
+        assertTrue(resolver.canResolve("https://www.youtube.com/live/dQw4w9WgXcQ"))
         assertTrue(resolver.canResolve("https://m.youtube.com/watch?v=dQw4w9WgXcQ"))
         assertFalse(resolver.canResolve("https://www.youtube.com/channel/UC123"))
         assertFalse(resolver.canResolve("https://x.com/jack/status/20"))

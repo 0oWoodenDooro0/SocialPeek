@@ -12,7 +12,7 @@ class XResolver : PlatformResolver {
     override val platform: Platform = Platform.X
 
     private val tweetUrlPattern = Regex(
-        """https?://(?:www\.|mobile\.)?(?:twitter\.com|x\.com)/[A-Za-z0-9_]+/status/([0-9]+)""",
+        """https?://(?:www\.|mobile\.)?(?:twitter\.com|x\.com)/(?:[A-Za-z0-9_]+/|i/web/)?status/([0-9]+)""",
         RegexOption.IGNORE_CASE
     )
 

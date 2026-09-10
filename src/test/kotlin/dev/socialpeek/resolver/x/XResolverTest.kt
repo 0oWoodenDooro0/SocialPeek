@@ -21,6 +21,8 @@ class XResolverTest {
     fun `canResolve should match twitter and x URLs`() {
         assertTrue(resolver.canResolve("https://twitter.com/jack/status/20"))
         assertTrue(resolver.canResolve("https://x.com/elonmusk/status/1715438407489569064"))
+        assertTrue(resolver.canResolve("https://x.com/i/status/1715438407489569064"))
+        assertTrue(resolver.canResolve("https://twitter.com/i/web/status/1715438407489569064"))
         assertTrue(resolver.canResolve("http://mobile.twitter.com/user/status/123456?s=20"))
         assertFalse(resolver.canResolve("https://youtube.com/watch?v=123"))
         assertFalse(resolver.canResolve("https://x.com/home"))

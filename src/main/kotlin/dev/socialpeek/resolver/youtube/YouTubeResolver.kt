@@ -12,7 +12,7 @@ class YouTubeResolver : PlatformResolver {
     override val platform: Platform = Platform.YOUTUBE
 
     private val youtubeUrlPattern = Regex(
-        """(?:https?://)?(?:(?:www\.|m\.)?youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})""",
+        """(?:https?://)?(?:(?:www\.|m\.)?youtube\.com/(?:watch\?v=|shorts/|embed/|live/)|youtu\.be/)([a-zA-Z0-9_-]{11})""",
         RegexOption.IGNORE_CASE
     )
 

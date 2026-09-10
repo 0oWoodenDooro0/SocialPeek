@@ -21,6 +21,8 @@ class InstagramResolverTest {
     fun `canResolve should match instagram post, reel, and tv URLs`() {
         assertTrue(resolver.canResolve("https://www.instagram.com/p/Cx12345abc/"))
         assertTrue(resolver.canResolve("https://instagram.com/reel/Cx12345abc"))
+        assertTrue(resolver.canResolve("https://instagram.com/share/p/Cx12345abc/"))
+        assertTrue(resolver.canResolve("https://instagram.com/share/reel/Cx12345abc/"))
         assertTrue(resolver.canResolve("https://instagr.am/p/Cx12345abc/"))
         assertTrue(resolver.canResolve("https://www.instagram.com/tv/Cx12345abc/"))
         assertFalse(resolver.canResolve("https://www.instagram.com/stories/user/123/"))
@@ -55,7 +57,7 @@ class InstagramResolverTest {
             htmlResponse(embedHtml)
         }
 
-        val post = resolver.resolve("https://www.instagram.com/p/Cx12345abc/", client)
+        val post = resolver.resolve("https://www.instagram.com/share/p/Cx12345abc/", client)
 
         assertEquals(Platform.INSTAGRAM, post.platform)
         assertEquals("Cx12345abc", post.id)

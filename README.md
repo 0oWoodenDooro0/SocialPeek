@@ -72,7 +72,7 @@ val client = SocialPeek.builder()
     // .addResolver(MyCustomResolver())
     .build()
 
-val post = client.peek("https://www.reddit.com/r/Kotlin/comments/1cdefgh/")
+val post = client.peek("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE")
 ```
 
 ---
@@ -81,11 +81,11 @@ val post = client.peek("https://www.reddit.com/r/Kotlin/comments/1cdefgh/")
 
 | 平臺 | 支援網址格式 | 提取內容 |
 | :--- | :--- | :--- |
-| **X (Twitter)** | `x.com/*/status/*`, `twitter.com/*/status/*` | 內文、作者認證、多圖、最高畫質 MP4 影片、讚數、回覆數 |
-| **Reddit** | `reddit.com/r/*/comments/*`, `redd.it/*` | 標題、內文、作者、Subreddit、多圖 Gallery、原生影片、Upvotes、留言數 |
-| **YouTube** | `youtube.com/watch?v=*`, `youtu.be/*`, `shorts/*` | 標題、作者名稱、作者頻道 handle、高畫質縮圖、影片連結 |
+| **X (Twitter)** | `x.com/*/status/*`, `x.com/i/status/*`, `twitter.com/*/status/*` | 內文、作者認證、多圖、最高畫質 MP4 影片、讚數、回覆數 |
+| **Reddit** | `reddit.com/r/*/comments/*`, `reddit.com/r/*/s/*` (分享短鏈), `redd.it/*` | 標題、內文、作者、Subreddit、多圖 Gallery、原生影片、Upvotes、留言數，具備 oEmbed 容錯保險機制 |
+| **YouTube** | `youtube.com/watch?v=*`, `youtu.be/*`, `shorts/*`, `youtube.com/live/*` (直播) | 標題、作者名稱、作者頻道 handle、高畫質縮圖、影片連結 |
 | **Bilibili** | `bilibili.com/video/BV*`, `opus/*`, `t.bilibili.com/*`, `b23.tv/*` | 標題、作者、多圖動態、封面、影片時長、播放量、點讚、彈幕、轉發、收藏數 |
-| **Instagram** | `instagram.com/p/*`, `reel/*`, `tv/*` | 作者、大頭貼、貼文內文、照片直鏈、Reels 影片直鏈 |
+| **Instagram** | `instagram.com/p/*`, `instagram.com/share/p/*`, `reel/*`, `tv/*` | 作者、大頭貼、貼文內文、照片直鏈、Reels 影片直鏈 |
 | **Threads** | `threads.net/@*/post/*`, `threads.net/t/*` | 作者姓名、帳號、內文、高畫質圖片直鏈、影片直鏈 |
 
 ---

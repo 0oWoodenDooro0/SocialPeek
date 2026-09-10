@@ -12,7 +12,7 @@ class InstagramResolver : PlatformResolver {
     override val platform: Platform = Platform.INSTAGRAM
 
     private val instagramUrlPattern = Regex(
-        """https?://(?:(?:www\.|m\.)?(?:instagram\.com|instagr\.am))/(?:p|reel|tv)/([a-zA-Z0-9_-]+)""",
+        """https?://(?:(?:www\.|m\.)?(?:instagram\.com|instagr\.am))/(?:share/)?(?:p|reel|tv)/([a-zA-Z0-9_-]+)""",
         RegexOption.IGNORE_CASE
     )
 

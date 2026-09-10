@@ -3,6 +3,7 @@ package dev.socialpeek.resolver.reddit
 import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.Media
 import dev.socialpeek.model.Platform
+import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.test.createMockHttpClient
 import dev.socialpeek.test.jsonResponse
 import io.ktor.http.*
@@ -23,8 +24,50 @@ class RedditResolverTest {
         assertTrue(resolver.canResolve("https://reddit.com/comments/1cdefgh"))
         assertTrue(resolver.canResolve("https://redd.it/1cdefgh"))
         assertTrue(resolver.canResolve("http://old.reddit.com/r/programming/comments/1cdefgh/"))
+        assertTrue(resolver.canResolve("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE"))
+        assertTrue(resolver.canResolve("https://reddit.com/s/7GwvvFKRsE"))
         assertFalse(resolver.canResolve("https://reddit.com/r/Kotlin"))
         assertFalse(resolver.canResolve("https://x.com/jack/status/20"))
+    }
+
+    @Test
+    fun `resolve should follow redirect for reddit share link and parse post`() = runTest {
+        val shareUrl = "https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE"
+        val targetUrl = "https://www.reddit.com/r/google_antigravity/comments/1wbqdaj/account_disabled/"
+        
+        val oembedJson = """
+        {
+            "title": "Account Disabled",
+            "author_name": "xethorn",
+            "provider_name": "reddit"
+        }
+        """.trimIndent()
+
+        val mockHttpClient = object : SocialPeekHttpClient {
+            override suspend fun get(url: String, headers: Map<String, String>): String {
+                if (url.contains("comments/1wbqdaj.json")) {
+                    throw RuntimeException("403 Forbidden")
+                }
+                if (url.contains("oembed")) {
+                    return oembedJson
+                }
+                return ""
+            }
+
+            override suspend fun resolveFinalUrl(url: String): String {
+                if (url == shareUrl) return targetUrl
+                return url
+            }
+        }
+
+        val post = resolver.resolve(shareUrl, mockHttpClient)
+
+        assertEquals(Platform.REDDIT, post.platform)
+        assertEquals("1wbqdaj", post.id)
+        assertEquals("Account Disabled", post.title)
+        assertEquals("xethorn", post.author.username)
+        assertEquals(1, post.media.size)
+        assertEquals("https://share.redd.it/preview/post/1wbqdaj", post.media.first().url)
     }
 
     @Test
