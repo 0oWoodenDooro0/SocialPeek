@@ -13,7 +13,7 @@ repositories {
 
 val ktorVersion = "3.5.2"
 val serializationVersion = "1.11.0"
-val coroutinesVersion = "1.10.1"
+val coroutinesVersion = "1.10.2"
 val jsoupVersion = "1.21.1"
 val junitVersion = "5.12.0"
 

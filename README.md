@@ -12,7 +12,7 @@
 2. **極致簡潔的呼叫介面 (Deep Module)**：只需 `SocialPeek.peek(url)` 即可自動匹配平臺並提取結構化資料。
 3. **策略模式 (Strategy Pattern)**：各平臺各自實作 `PlatformResolver`，易擴展、高維護性。
 4. **協程友善 (Kotlin Coroutines)**：原生 `suspend fun` 支援與非阻塞 I/O。
-5. **最新依賴與技術棧**：Kotlin 2.x、Ktor 3.5.x、kotlinx.serialization、Jsoup 1.21.x。
+5. **最新依賴與技術棧**：Kotlin 2.x、Ktor 3.5.x、kotlinx.coroutines 1.10.x、kotlinx.serialization、Jsoup 1.21.x。
 6. **JitPack 開箱即用**：內建 `maven-publish` 配置。
 
 ---
@@ -32,7 +32,7 @@ repositories {
 
 ```kotlin
 dependencies {
-    implementation("com.github.<YourUsername>:SocialPeek:<ReleaseTag>")
+    implementation("com.github.0oWoodenDooro0:SocialPeek:main-SNAPSHOT")
 }
 ```
 
