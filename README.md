@@ -32,7 +32,7 @@ repositories {
 
 ```kotlin
 dependencies {
-    implementation("com.github.0oWoodenDooro0:SocialPeek:main-SNAPSHOT")
+    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.1.0")
 }
 ```
 
@@ -48,71 +48,71 @@ import dev.socialpeek.SocialPeek
 suspend fun main() {
     // 解析 X (Twitter) 貼文
     val tweet = SocialPeek.peek("https://x.com/jack/status/20")
-    println("Author: ${tweet.author.displayName} (@${tweet.author.username})")
-    println("Content: ${tweet.content}")
-    println("Likes: ${tweet.metrics?.likes}")
+    println(tweet.content)
+    println(tweet.author.displayName)
 
-    // 解析 B站 影片或動態
+    // 解析 Bilibili 影片/動態
     val bili = SocialPeek.peek("https://www.bilibili.com/video/BV1xx411c7mD")
-    println("Title: ${bili.title}")
-    println("Cover: ${bili.media.firstOrNull()?.previewUrl}")
+    println(bili.title)
+    println(bili.media)
 
-    // 安全解析 (不匹配或失敗回傳 null)
-    val post = SocialPeek.peekOrNull("https://unknown.com/abc")
+    // 安全解析 (失敗時回傳 null)
+    val post = SocialPeek.peekOrNull("https://www.instagram.com/p/invalid-link/")
+    if (post == null) {
+        println("無法解析此連結")
+    }
 }
 ```
 
-### 2. 自訂 Client
+### 2. 進階自訂與擴展 (Builder 模式)
+
+您可以透過 `SocialPeek.builder()` 抽換底層 HTTP 客戶端、新增自訂的社群平臺 Resolver，或是選擇性停用預設的 Resolver：
 
 ```kotlin
 import dev.socialpeek.SocialPeek
+import dev.socialpeek.network.KtorSocialPeekHttpClient
+import io.ktor.client.*
+import io.ktor.client.engine.cio.*
 
-val client = SocialPeek.builder()
-    .includeDefaultResolvers(true)
-    // .addResolver(MyCustomResolver())
+val customKtorClient = HttpClient(CIO) {
+    // 自訂超時、代理伺服器 (Proxy) 或其他外掛
+}
+
+val socialPeek = SocialPeek.builder()
+    .httpClient(KtorSocialPeekHttpClient(customKtorClient))
+    // .addResolver(MyCustomPlatformResolver())
     .build()
 
-val post = client.peek("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE")
+suspend fun parse() {
+    val post = socialPeek.peek("https://threads.net/@user/post/...")
+}
 ```
 
 ---
 
-## 📱 目前已支援的平臺 (全部通過 TDD 單元測試)
+## 🌐 支援平臺
 
-| 平臺 | 支援網址格式 | 提取內容 |
+| 平臺 | 支援的 URL 形式範例 | 提取內容 |
 | :--- | :--- | :--- |
-| **X (Twitter)** | `x.com/*/status/*`, `x.com/i/status/*`, `twitter.com/*/status/*` | 內文、作者認證、多圖、最高畫質 MP4 影片、讚數、回覆數 |
-| **Reddit** | `reddit.com/r/*/comments/*`, `reddit.com/r/*/s/*` (分享短鏈), `redd.it/*` | 標題、內文、作者、Subreddit、多圖 Gallery、原生影片、Upvotes、留言數，具備 oEmbed 容錯保險機制 |
-| **YouTube** | `youtube.com/watch?v=*`, `youtu.be/*`, `shorts/*`, `youtube.com/live/*` (直播) | 標題、作者名稱、作者頻道 handle、高畫質縮圖、影片連結 |
-| **Bilibili** | `bilibili.com/video/BV*`, `opus/*`, `t.bilibili.com/*`, `b23.tv/*` | 標題、作者、多圖動態、封面、影片時長、播放量、點讚、彈幕、轉發、收藏數 |
-| **Instagram** | `instagram.com/p/*`, `instagram.com/share/p/*`, `reel/*`, `tv/*` | 作者、大頭貼、貼文內文、照片直鏈、Reels 影片直鏈 |
-| **Threads** | `threads.net/@*/post/*`, `threads.net/t/*` | 作者姓名、帳號、內文、高畫質圖片直鏈、影片直鏈 |
+| **X (Twitter)** | `x.com/.../status/...`, `twitter.com/...` | 作者、推文文字、圖片/影片預覽、統計數據 (轉推/點讚) |
+| **Instagram** | `instagram.com/p/...`, `.../reel/...`, `.../share/p/...` | 圖片 (多圖輪播)、Reel 封面與作者資訊 |
+| **Threads** | `threads.net/@user/post/...`, `threads.com/share/...` | 作者、貼文內容、輪播圖片 (多張)、影片預覽 |
+| **Bilibili** | `bilibili.com/video/BV...`, `.../opus/...`, `b23.tv/...` | 標題、簡介、封面圖、作者名稱、播放/硬幣/彈幕等數據 |
+| **YouTube** | `youtube.com/watch?v=...`, `youtu.be/...`, `.../shorts/...`, `.../live/...` | 標題、作者/頻道名、縮圖、oEmbed 詮釋資料 |
+| **Reddit** | `reddit.com/r/.../comments/...`, `redd.it/...`, `reddit.com/r/.../s/...` (短網址分享) | 標題、內文 (Selftext)、多圖畫廊 (Gallery)、子版 (Subreddit)、點讚/留言數 |
 
 ---
 
-## 🧱 核心資料結構
+## 🧪 執行測試
 
-### `PeekPost`
-- `platform`: `Platform` (BILIBILI, X, INSTAGRAM, THREADS, YOUTUBE, REDDIT...)
-- `id`: 平臺原生 ID
-- `originalUrl`: 標準化後的貼文網址
-- `author`: `Author` (id, username, displayName, avatarUrl, profileUrl, isVerified)
-- `content`: 貼文純文字內容
-- `title`: 標題（影片或特定平臺文章具有）
-- `media`: `List<Media>` (`Media.Image` 或 `Media.Video`，包含寬高、時長與直鏈)
-- `metrics`: `Metrics` (likes, reposts, comments, views, bookmarks)
-- `createdAtEpochSeconds`: 建立時間戳記
-
----
-
-## 🛠️ 開發與測試
-
-本專案全面採用 **TDD (Test-Driven Development)** 開發：
+本專案附帶完整的單元測試與 Mock 網路測試，可直接執行：
 
 ```bash
-# 執行所有測試
 ./gradlew test
-
-# 發佈到本地 Maven 庫驗證
-./gradlew publishToMavenLocal
 ```
+
+---
+
+## 📄 授權協議
+
+本專案採用 [Apache License 2.0](LICENSE) 授權。

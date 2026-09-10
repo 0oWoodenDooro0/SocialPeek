@@ -4,7 +4,7 @@ plugins {
     `maven-publish`
 }
 
-group = "com.github.user"
+group = "com.github.0oWoodenDooro0"
 version = "0.1.0"
 
 repositories {
@@ -59,7 +59,7 @@ publishing {
             pom {
                 name.set("SocialPeek")
                 description.set("A pure Kotlin multi-platform social media post metadata and media parser")
-                url.set("https://github.com/user/SocialPeek")
+                url.set("https://github.com/0oWoodenDooro0/SocialPeek")
                 licenses {
                     license {
                         name.set("The Apache License, Version 2.0")
@@ -68,8 +68,8 @@ publishing {
                 }
                 developers {
                     developer {
-                        id.set("user")
-                        name.set("User")
+                        id.set("0oWoodenDooro0")
+                        name.set("0oWoodenDooro0")
                     }
                 }
             }
