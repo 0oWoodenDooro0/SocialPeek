@@ -65,6 +65,80 @@ class InstagramResolverTest {
     }
 
     @Test
+    fun `resolve should parse multi-image carousel post from Instagram`() = runTest {
+        val scriptJson = """
+        {
+            "entry_data": {
+                "PostPage": [{
+                    "graphql": {
+                        "shortcode_media": {
+                            "carousel_media": [
+                                {
+                                    "__typename": "XIGPolarisImageMedia",
+                                    "image_versions2": {
+                                        "candidates": [
+                                            { "url": "https://instagram.fxxx.fbcdn.net/slide1.jpg", "width": 1080, "height": 1080 }
+                                        ]
+                                    }
+                                },
+                                {
+                                    "__typename": "XIGPolarisImageMedia",
+                                    "image_versions2": {
+                                        "candidates": [
+                                            { "url": "https://instagram.fxxx.fbcdn.net/slide2.jpg", "width": 1080, "height": 1080 }
+                                        ]
+                                    }
+                                },
+                                {
+                                    "__typename": "XIGPolarisImageMedia",
+                                    "image_versions2": {
+                                        "candidates": [
+                                            { "url": "https://instagram.fxxx.fbcdn.net/slide3.jpg", "width": 1080, "height": 1080 }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }]
+            }
+        }
+        """.trimIndent()
+
+        val botHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:title" content="Kim Kardashian on Instagram: &quot;🧁&quot;" />
+            <meta property="og:description" content="1,620,641 likes, 9,323 comments - kimkardashian on August 20, 2024: &quot;🧁&quot;" />
+            <meta property="og:image" content="https://instagram.fxxx.fbcdn.net/slide1.jpg" />
+            <script type="application/json">$scriptJson</script>
+        </head>
+        </html>
+        """.trimIndent()
+
+        val client = createMockHttpClient { request ->
+            if (request.url.encodedPath == "/p/C-6WRvdS75Q/") {
+                htmlResponse(botHtml)
+            } else {
+                htmlResponse("Not found", HttpStatusCode.NotFound)
+            }
+        }
+
+        val post = resolver.resolve("https://www.instagram.com/p/C-6WRvdS75Q/", client)
+
+        assertEquals(Platform.INSTAGRAM, post.platform)
+        assertEquals("C-6WRvdS75Q", post.id)
+        assertEquals("kimkardashian", post.author.username)
+        assertEquals("Kim Kardashian", post.author.displayName)
+        assertEquals("🧁", post.content)
+        assertEquals(3, post.media.size)
+        assertEquals("https://instagram.fxxx.fbcdn.net/slide1.jpg", (post.media[0] as Media.Image).url)
+        assertEquals("https://instagram.fxxx.fbcdn.net/slide2.jpg", (post.media[1] as Media.Image).url)
+        assertEquals("https://instagram.fxxx.fbcdn.net/slide3.jpg", (post.media[2] as Media.Image).url)
+    }
+
+    @Test
     fun `resolve should fallback to embed page when direct bot request fails`() = runTest {
         val embedHtml = """
         <!DOCTYPE html>

@@ -65,45 +65,87 @@ class XResolver : PlatformResolver {
 
         val mediaList = mutableListOf<Media>()
 
-        // 1. Photos
-        rootElement["photos"]?.jsonArray?.forEach { photoElem ->
-            val photoObj = photoElem.jsonObject
-            val photoUrl = photoObj["url"]?.jsonPrimitive?.contentOrNull
-            if (!photoUrl.isNullOrBlank()) {
-                val width = photoObj["width"]?.jsonPrimitive?.intOrNull
-                val height = photoObj["height"]?.jsonPrimitive?.intOrNull
-                mediaList.add(
-                    Media.Image(
-                        url = photoUrl,
-                        previewUrl = photoUrl,
-                        width = width,
-                        height = height
-                    )
-                )
+        // 1. media_extended (vxTwitter / fxTwitter rich multi-media format)
+        val mediaExtended = rootElement["media_extended"]?.jsonArray
+        if (mediaExtended != null && mediaExtended.isNotEmpty()) {
+            mediaExtended.forEach { elem ->
+                val obj = elem.jsonObject
+                val type = obj["type"]?.jsonPrimitive?.contentOrNull
+                val mediaUrl = obj["url"]?.jsonPrimitive?.contentOrNull
+                val size = obj["size"]?.jsonObject
+                val width = size?.get("w")?.jsonPrimitive?.intOrNull
+                val height = size?.get("h")?.jsonPrimitive?.intOrNull
+                if (!mediaUrl.isNullOrBlank()) {
+                    if (type == "image") {
+                        mediaList.add(
+                            Media.Image(
+                                url = mediaUrl,
+                                previewUrl = mediaUrl,
+                                width = width,
+                                height = height
+                            )
+                        )
+                    } else if (type == "video" || type == "gif") {
+                        val thumb = obj["thumbnail_url"]?.jsonPrimitive?.contentOrNull
+                        mediaList.add(
+                            Media.Video(
+                                url = mediaUrl,
+                                previewUrl = thumb,
+                                width = width,
+                                height = height
+                            )
+                        )
+                    }
+                }
             }
         }
 
-        // 2. Videos
-        val videoObj = rootElement["video"]?.jsonObject
-        if (videoObj != null) {
-            val posterUrl = videoObj["poster"]?.jsonPrimitive?.contentOrNull
-            val variants = videoObj["variants"]?.jsonArray ?: JsonArray(emptyList())
-            
-            val bestVariant = variants.mapNotNull { it.jsonObject }
-                .filter { it["type"]?.jsonPrimitive?.contentOrNull == "video/mp4" }
-                .maxByOrNull { it["bitrate"]?.jsonPrimitive?.longOrNull ?: 0L }
-
-            val videoSrc = bestVariant?.get("src")?.jsonPrimitive?.contentOrNull
-                ?: variants.firstOrNull()?.jsonObject?.get("src")?.jsonPrimitive?.contentOrNull
-
-            if (!videoSrc.isNullOrBlank()) {
-                mediaList.add(
-                    Media.Video(
-                        url = videoSrc,
-                        previewUrl = posterUrl,
-                        bitrate = bestVariant?.get("bitrate")?.jsonPrimitive?.longOrNull
+        // 2. Photos (if media_extended wasn't present or yielded no images)
+        if (mediaList.isEmpty()) {
+            rootElement["photos"]?.jsonArray?.forEach { photoElem ->
+                val photoUrl = if (photoElem is JsonObject) {
+                    photoElem["url"]?.jsonPrimitive?.contentOrNull
+                } else {
+                    photoElem.jsonPrimitive.contentOrNull
+                }
+                val width = (photoElem as? JsonObject)?.get("width")?.jsonPrimitive?.intOrNull
+                val height = (photoElem as? JsonObject)?.get("height")?.jsonPrimitive?.intOrNull
+                if (!photoUrl.isNullOrBlank()) {
+                    mediaList.add(
+                        Media.Image(
+                            url = photoUrl,
+                            previewUrl = photoUrl,
+                            width = width,
+                            height = height
+                        )
                     )
-                )
+                }
+            }
+        }
+
+        // 3. Videos (if not already captured by media_extended)
+        if (mediaList.none { it is Media.Video }) {
+            val videoObj = rootElement["video"]?.jsonObject
+            if (videoObj != null) {
+                val posterUrl = videoObj["poster"]?.jsonPrimitive?.contentOrNull
+                val variants = videoObj["variants"]?.jsonArray ?: JsonArray(emptyList())
+
+                val bestVariant = variants.mapNotNull { it.jsonObject }
+                    .filter { it["type"]?.jsonPrimitive?.contentOrNull == "video/mp4" }
+                    .maxByOrNull { it["bitrate"]?.jsonPrimitive?.longOrNull ?: 0L }
+
+                val videoSrc = bestVariant?.get("src")?.jsonPrimitive?.contentOrNull
+                    ?: variants.firstOrNull()?.jsonObject?.get("src")?.jsonPrimitive?.contentOrNull
+
+                if (!videoSrc.isNullOrBlank()) {
+                    mediaList.add(
+                        Media.Video(
+                            url = videoSrc,
+                            previewUrl = posterUrl,
+                            bitrate = bestVariant?.get("bitrate")?.jsonPrimitive?.longOrNull
+                        )
+                    )
+                }
             }
         }
 

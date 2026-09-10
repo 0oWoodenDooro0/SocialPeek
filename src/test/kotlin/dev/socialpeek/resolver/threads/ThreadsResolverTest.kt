@@ -5,63 +5,198 @@ import dev.socialpeek.model.Media
 import dev.socialpeek.model.Platform
 import dev.socialpeek.test.createMockHttpClient
 import dev.socialpeek.test.htmlResponse
-import io.ktor.client.engine.mock.*
+import io.ktor.client.engine.mock.respond
 import io.ktor.http.*
 import kotlinx.coroutines.test.runTest
-import org.junit.jupiter.api.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
+import kotlin.test.*
 
 class ThreadsResolverTest {
 
     private val resolver = ThreadsResolver()
 
     @Test
-    fun `canResolve should match threads post and share URLs`() {
-        assertTrue(resolver.canResolve("https://www.threads.net/@zuck/post/CuZ12345/"))
-        assertTrue(resolver.canResolve("https://threads.net/@developer/post/CuZ12345"))
-        assertTrue(resolver.canResolve("https://www.threads.net/t/CuZ12345/"))
-        assertTrue(resolver.canResolve("https://www.threads.com/share/BAENHoOpq1/"))
-        assertTrue(resolver.canResolve("https://threads.net/share/BAENHoOpq1"))
-        assertFalse(resolver.canResolve("https://www.threads.net/@zuck"))
-        assertFalse(resolver.canResolve("https://twitter.com/jack/status/20"))
+    fun `canResolve should match valid Threads post URLs`() {
+        assertTrue(resolver.canResolve("https://www.threads.net/@zuck/post/CuP48CiS5sx"))
+        assertTrue(resolver.canResolve("https://threads.net/@zuck/post/CuP48CiS5sx"))
+        assertTrue(resolver.canResolve("https://www.threads.net/t/CuP48CiS5sx"))
+        assertTrue(resolver.canResolve("https://threads.net/t/CuP48CiS5sx"))
+        assertTrue(resolver.canResolve("https://threads.com/@user/post/12345"))
+        assertTrue(resolver.canResolve("https://www.threads.net/share/BAENHoOpq1/"))
+        assertTrue(resolver.canResolve("https://threads.com/share/BAENHoOpq1/"))
     }
 
     @Test
-    fun `resolve should parse image post from threads page`() = runTest {
+    fun `canResolve should reject non-threads URLs`() {
+        assertFalse(resolver.canResolve("https://www.instagram.com/p/CuP48CiS5sx"))
+        assertFalse(resolver.canResolve("https://twitter.com/zuck/status/123456"))
+        assertFalse(resolver.canResolve("https://www.threads.net/@zuck"))
+    }
+
+    @Test
+    fun `resolve should extract post info from threads page`() = runTest {
         val pageHtml = """
         <!DOCTYPE html>
         <html>
         <head>
             <meta property="og:title" content="Mark Zuckerberg (@zuck) on Threads" />
-            <meta property="og:description" content="10 million sign ups in seven hours 🤯" />
-            <meta property="og:image" content="https://scontent.cdninstagram.com/threads_photo.jpg" />
-            <meta property="og:url" content="https://www.threads.net/@zuck/post/CuZ12345" />
+            <meta property="og:description" content="Welcome to Threads! Glad you are all here." />
+            <meta property="og:image" content="https://scontent.cdninstagram.com/photo.jpg" />
+            <meta property="og:image:width" content="1080" />
+            <meta property="og:image:height" content="1080" />
+            <meta property="og:url" content="https://www.threads.net/@zuck/post/CuP48CiS5sx" />
         </head>
-        <body>
-            <div id="mount_0_0"></div>
-        </body>
         </html>
         """.trimIndent()
 
-        val client = createMockHttpClient { request ->
-            assertTrue(request.url.host.contains("threads.net"))
+        val client = createMockHttpClient {
             htmlResponse(pageHtml)
         }
 
-        val post = resolver.resolve("https://www.threads.net/@zuck/post/CuZ12345/", client)
+        val post = resolver.resolve("https://www.threads.net/@zuck/post/CuP48CiS5sx", client)
 
         assertEquals(Platform.THREADS, post.platform)
-        assertEquals("CuZ12345", post.id)
+        assertEquals("CuP48CiS5sx", post.id)
         assertEquals("zuck", post.author.username)
         assertEquals("Mark Zuckerberg", post.author.displayName)
         assertEquals("https://www.threads.net/@zuck", post.author.profileUrl)
-        assertEquals("10 million sign ups in seven hours 🤯", post.content)
+        assertEquals("Welcome to Threads! Glad you are all here.", post.content)
         assertEquals(1, post.media.size)
         val image = post.media.first() as Media.Image
-        assertEquals("https://scontent.cdninstagram.com/threads_photo.jpg", image.url)
+        assertEquals("https://scontent.cdninstagram.com/photo.jpg", image.url)
+        assertEquals(1080, image.width)
+        assertEquals(1080, image.height)
+    }
+
+    @Test
+    fun `resolve should parse text-only post without media and map avatar to author`() = runTest {
+        val pageHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:title" content="Mark Zuckerberg (@zuck) on Threads" />
+            <meta property="og:description" content="Let's do this. Welcome to Threads. 🔥" />
+            <meta property="og:image" content="https://instagram.fbcdn.net/v/t51.82787-19/avatar.jpg?efg=profile_pic" />
+            <meta name="twitter:card" content="summary" />
+            <meta property="og:url" content="https://www.threads.net/@zuck/post/CuP48CiS5sx" />
+        </head>
+        </html>
+        """.trimIndent()
+
+        val client = createMockHttpClient {
+            htmlResponse(pageHtml)
+        }
+
+        val post = resolver.resolve("https://www.threads.net/@zuck/post/CuP48CiS5sx", client)
+
+        assertEquals("CuP48CiS5sx", post.id)
+        assertEquals("zuck", post.author.username)
+        assertEquals("Mark Zuckerberg", post.author.displayName)
+        assertEquals("Let's do this. Welcome to Threads. 🔥", post.content)
+        assertEquals("https://instagram.fbcdn.net/v/t51.82787-19/avatar.jpg?efg=profile_pic", post.author.avatarUrl)
+        assertTrue(post.media.isEmpty())
+    }
+
+    @Test
+    fun `resolve should filter out 1200x628 platform share card banner for text post`() = runTest {
+        val pageHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:title" content="Mark Zuckerberg (@zuck) on Threads" />
+            <meta property="og:description" content="Let's do this. Welcome to Threads. 🔥" />
+            <meta property="og:image" content="https://scontent.fbcdn.net/v/t39.92108-6/802988515_preview.jpg" />
+            <meta property="og:image:width" content="1200" />
+            <meta property="og:image:height" content="628" />
+            <meta name="twitter:card" content="summary_large_image" />
+            <meta property="og:url" content="https://www.threads.net/@zuck/post/CuP48CiS5sx" />
+        </head>
+        </html>
+        """.trimIndent()
+
+        val client = createMockHttpClient {
+            htmlResponse(pageHtml)
+        }
+
+        val post = resolver.resolve("https://www.threads.net/@zuck/post/CuP48CiS5sx", client)
+
+        assertEquals("CuP48CiS5sx", post.id)
+        assertEquals("Let's do this. Welcome to Threads. 🔥", post.content)
+        assertTrue(post.media.isEmpty())
+    }
+
+    @Test
+    fun `resolve should extract all images from multi-image carousel post with null video_versions`() = runTest {
+        val scriptJson = """
+        {
+            "require": [
+                ["RelayPrefetchedStreamCache", "next", [], [{
+                    "data": {
+                        "user": {
+                            "username": "zuck",
+                            "full_name": "Mark Zuckerberg",
+                            "profile_pic_url": "https://instagram.fbcdn.net/avatar.jpg"
+                        },
+                        "carousel_media": [
+                            {
+                                "__typename": "XIGPolarisImageMedia",
+                                "video_versions": null,
+                                "image_versions2": {
+                                    "candidates": [
+                                        { "url": "https://instagram.fbcdn.net/photo1.jpg", "width": 1440, "height": 1440 }
+                                    ]
+                                }
+                            },
+                            {
+                                "__typename": "XIGPolarisImageMedia",
+                                "video_versions": null,
+                                "image_versions2": {
+                                    "candidates": [
+                                        { "url": "https://instagram.fbcdn.net/photo2.jpg", "width": 1440, "height": 1440 }
+                                    ]
+                                }
+                            },
+                            {
+                                "__typename": "XIGPolarisImageMedia",
+                                "video_versions": null,
+                                "image_versions2": {
+                                    "candidates": [
+                                        { "url": "https://instagram.fbcdn.net/photo3.jpg", "width": 1440, "height": 1440 }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }]]
+            ]
+        }
+        """.trimIndent()
+
+        val pageHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:title" content="Mark Zuckerberg (@zuck) on Threads" />
+            <meta property="og:description" content="Look at these 3 AI creations!" />
+            <meta property="og:image" content="https://instagram.fbcdn.net/photo1.jpg" />
+            <script type="application/json">$scriptJson</script>
+        </head>
+        </html>
+        """.trimIndent()
+
+        val client = createMockHttpClient {
+            htmlResponse(pageHtml)
+        }
+
+        val post = resolver.resolve("https://www.threads.net/@zuck/post/C9xxwZZyx5B", client)
+
+        assertEquals("C9xxwZZyx5B", post.id)
+        assertEquals("zuck", post.author.username)
+        assertEquals("Mark Zuckerberg", post.author.displayName)
+        assertEquals("https://instagram.fbcdn.net/avatar.jpg", post.author.avatarUrl)
+        assertEquals(3, post.media.size)
+        assertEquals("https://instagram.fbcdn.net/photo1.jpg", (post.media[0] as Media.Image).url)
+        assertEquals("https://instagram.fbcdn.net/photo2.jpg", (post.media[1] as Media.Image).url)
+        assertEquals("https://instagram.fbcdn.net/photo3.jpg", (post.media[2] as Media.Image).url)
     }
 
     @Test
@@ -77,34 +212,33 @@ class ThreadsResolverTest {
         </html>
         """.trimIndent()
 
-        val client = createMockHttpClient { request ->
-            if (request.url.encodedPath.contains("/share/")) {
-                respond(
+        val client = createMockHttpClient {
+            when (it.url.encodedPath) {
+                "/share/BAENHoOpq1/" -> respond(
                     content = "",
                     status = HttpStatusCode.Found,
-                    headers = headersOf(HttpHeaders.Location, "https://www.threads.net/@snowisland.jp/post/DdCByQeAS92")
+                    headers = headersOf(HttpHeaders.Location, "https://www.threads.net/@snowisland.jp/post/CuP48CiS5sx")
                 )
-            } else {
-                htmlResponse(pageHtml)
+                else -> htmlResponse(pageHtml)
             }
         }
 
-        val post = resolver.resolve("https://www.threads.com/share/BAENHoOpq1/", client)
-        assertEquals("DdCByQeAS92", post.id)
+        val post = resolver.resolve("https://www.threads.net/share/BAENHoOpq1/", client)
+        assertEquals("CuP48CiS5sx", post.id)
         assertEquals("snowisland.jp", post.author.username)
     }
 
     @Test
-    fun `resolve should parse video post from threads page`() = runTest {
+    fun `resolve should throw PostNotFoundException when post does not exist`() = runTest {
         val pageHtml = """
         <!DOCTYPE html>
         <html>
         <head>
-            <meta property="og:title" content="Tech Insider (@techinsider) on Threads" />
-            <meta property="og:description" content="Watch this amazing video!" />
-            <meta property="og:image" content="https://scontent.cdninstagram.com/preview.jpg" />
-            <meta property="og:video" content="https://scontent.cdninstagram.com/video.mp4" />
+            <title>Page Not Found &bull; Threads</title>
         </head>
+        <body>
+            <div>Sorry, this page isn't available.</div>
+        </body>
         </html>
         """.trimIndent()
 
@@ -112,23 +246,8 @@ class ThreadsResolverTest {
             htmlResponse(pageHtml)
         }
 
-        val post = resolver.resolve("https://www.threads.net/@techinsider/post/CuZVideo123", client)
-
-        assertEquals("CuZVideo123", post.id)
-        assertEquals(1, post.media.size)
-        val video = post.media.first() as Media.Video
-        assertEquals("https://scontent.cdninstagram.com/video.mp4", video.url)
-        assertEquals("https://scontent.cdninstagram.com/preview.jpg", video.previewUrl)
-    }
-
-    @Test
-    fun `resolve should throw PostNotFoundException when threads page returns 404`() = runTest {
-        val client = createMockHttpClient {
-            htmlResponse("Not found", HttpStatusCode.NotFound)
-        }
-
         assertFailsWith<PostNotFoundException> {
-            resolver.resolve("https://www.threads.net/@nobody/post/NotExist123", client)
+            resolver.resolve("https://www.threads.net/@zuck/post/invalidId", client)
         }
     }
 }

@@ -93,6 +93,59 @@ class BilibiliResolverTest {
     }
 
     @Test
+    fun `resolve should parse opus dynamic post with multiple pictures`() = runTest {
+        val opusMockJson = """
+        {
+            "code": 0,
+            "data": {
+                "item": {
+                    "id_str": "999888777",
+                    "type": "DYNAMIC_TYPE_DRAW",
+                    "modules": {
+                        "module_author": {
+                            "mid": 123456,
+                            "name": "Illustrator",
+                            "face": "https://i0.hdslb.com/avatar.jpg",
+                            "pub_ts": 1700000000
+                        },
+                        "module_dynamic": {
+                            "desc": { "text": "Check out my new illustrations!" },
+                            "major": {
+                                "opus": {
+                                    "pics": [
+                                        { "url": "https://i0.hdslb.com/art1.jpg", "width": 1920, "height": 1080 },
+                                        { "url": "https://i0.hdslb.com/art2.jpg", "width": 1920, "height": 1080 },
+                                        { "url": "https://i0.hdslb.com/art3.jpg", "width": 1920, "height": 1080 }
+                                    ]
+                                }
+                            }
+                        },
+                        "module_stat": {
+                            "like": { "count": 555 },
+                            "comment": { "count": 66 }
+                        }
+                    }
+                }
+            }
+        }
+        """.trimIndent()
+
+        val client = createMockHttpClient {
+            jsonResponse(opusMockJson)
+        }
+
+        val post = resolver.resolve("https://www.bilibili.com/opus/999888777", client)
+
+        assertEquals("999888777", post.id)
+        assertEquals("Illustrator", post.author.displayName)
+        assertEquals("Check out my new illustrations!", post.content)
+        assertEquals(3, post.media.size)
+        assertEquals("https://i0.hdslb.com/art1.jpg", (post.media[0] as Media.Image).url)
+        assertEquals("https://i0.hdslb.com/art2.jpg", (post.media[1] as Media.Image).url)
+        assertEquals("https://i0.hdslb.com/art3.jpg", (post.media[2] as Media.Image).url)
+    }
+
+    @Test
     fun `resolve should follow b23-tv short link redirect with query string`() = runTest {
         val videoMockJson = """
         {
@@ -129,7 +182,7 @@ class BilibiliResolverTest {
         val errorMockJson = """
         {
             "code": -404,
-            "message": "啥都木有"
+            "message": "啥都没有"
         }
         """.trimIndent()
 

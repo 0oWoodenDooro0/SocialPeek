@@ -6,7 +6,7 @@ import dev.socialpeek.model.Platform
 import dev.socialpeek.test.createMockHttpClient
 import dev.socialpeek.test.htmlResponse
 import dev.socialpeek.test.jsonResponse
-import io.ktor.client.engine.mock.*
+import io.ktor.client.engine.mock.respond
 import io.ktor.http.*
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
@@ -20,13 +20,14 @@ class RedditResolverTest {
     private val resolver = RedditResolver()
 
     @Test
-    fun `canResolve should match reddit post URLs and share URLs`() {
-        assertTrue(resolver.canResolve("https://www.reddit.com/r/kotlindev/comments/12345/awesome_library/"))
-        assertTrue(resolver.canResolve("https://reddit.com/r/kotlindev/comments/12345"))
-        assertTrue(resolver.canResolve("https://old.reddit.com/r/kotlindev/comments/12345"))
+    fun `canResolve should match valid Reddit post and comment URLs`() {
+        assertTrue(resolver.canResolve("https://www.reddit.com/r/kotlindev/comments/12345/socialpeek_released/"))
+        assertTrue(resolver.canResolve("https://reddit.com/comments/12345/"))
+        assertTrue(resolver.canResolve("https://old.reddit.com/r/androiddev/comments/abcde/"))
         assertTrue(resolver.canResolve("https://redd.it/12345"))
-        assertTrue(resolver.canResolve("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE"))
-        assertTrue(resolver.canResolve("https://reddit.com/s/7GwvvFKRsE"))
+        assertTrue(resolver.canResolve("https://reddit.com/r/technology/s/9876543210"))
+        assertTrue(resolver.canResolve("https://redd.it/s/9876543210"))
+
         assertFalse(resolver.canResolve("https://reddit.com/r/kotlindev/"))
         assertFalse(resolver.canResolve("https://reddit.com/user/someone/"))
         assertFalse(resolver.canResolve("https://twitter.com/jack/status/20"))
@@ -81,7 +82,7 @@ class RedditResolverTest {
     }
 
     @Test
-    fun `resolve should fallback to oEmbed and Bot OpenGraph when JSON API fails`() = runTest {
+    fun `resolve should fallback to oEmbed and Bot OpenGraph and ignore platform share preview card`() = runTest {
         val oEmbedJson = """
         {
             "title": "Account Disabled",
@@ -122,7 +123,47 @@ class RedditResolverTest {
         assertEquals("My account has been disabled.", post.content)
         assertEquals(197L, post.metrics?.likes)
         assertEquals(138L, post.metrics?.comments)
+        assertTrue(post.media.isEmpty())
+    }
+
+    @Test
+    fun `resolve fallback should include real media image when present in og image`() = runTest {
+        val oEmbedJson = """
+        {
+            "title": "Look at my art",
+            "author_name": "artist_user",
+            "html": "<blockquote class=\"reddit-embed-bq\"><a href=\"https://www.reddit.com/r/art/comments/art123/\">Post</a> in <a href=\"https://www.reddit.com/r/art/\">art</a></blockquote>"
+        }
+        """.trimIndent()
+
+        val botHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="description" content="500 votes, 20 comments. Oil painting on canvas." />
+            <meta property="og:image" content="https://preview.redd.it/my_art_photo.jpg" />
+        </head>
+        </html>
+        """.trimIndent()
+
+        val client = createMockHttpClient { request ->
+            if (request.url.encodedPath.contains("oembed")) {
+                jsonResponse(oEmbedJson)
+            } else if (request.url.encodedPath.contains("comments/art123")) {
+                htmlResponse(botHtml)
+            } else {
+                respond("Blocked", HttpStatusCode.Forbidden)
+            }
+        }
+
+        val post = resolver.resolve("https://www.reddit.com/r/art/comments/art123/look_at_my_art/", client)
+
+        assertEquals(Platform.REDDIT, post.platform)
+        assertEquals("art123", post.id)
+        assertEquals("Look at my art", post.title)
         assertEquals(1, post.media.size)
+        val image = post.media.first() as Media.Image
+        assertEquals("https://preview.redd.it/my_art_photo.jpg", image.url)
     }
 
     @Test
@@ -205,6 +246,60 @@ class RedditResolverTest {
         assertEquals("https://i.redd.it/cat_picture.jpg", image.url)
         assertEquals(1080, image.width)
         assertEquals(720, image.height)
+    }
+
+    @Test
+    fun `resolve should parse multi-image gallery post from JSON`() = runTest {
+        val mockJson = """
+        [
+            {
+                "data": {
+                    "children": [
+                        {
+                            "data": {
+                                "id": "gallery123",
+                                "title": "My 3 vacation photos",
+                                "selftext": "Enjoying the summer!",
+                                "author": "traveler",
+                                "subreddit": "travel",
+                                "is_gallery": true,
+                                "gallery_data": {
+                                    "items": [
+                                        { "media_id": "img_1" },
+                                        { "media_id": "img_2" },
+                                        { "media_id": "img_3" }
+                                    ]
+                                },
+                                "media_metadata": {
+                                    "img_1": {
+                                        "s": { "u": "https://preview.redd.it/photo1.jpg?width=1080&amp;crop=smart&amp;auto=webp", "x": 1080, "y": 720 }
+                                    },
+                                    "img_2": {
+                                        "s": { "u": "https://preview.redd.it/photo2.jpg?width=1080&amp;crop=smart&amp;auto=webp", "x": 1080, "y": 720 }
+                                    },
+                                    "img_3": {
+                                        "s": { "u": "https://preview.redd.it/photo3.jpg?width=1080&amp;crop=smart&amp;auto=webp", "x": 1080, "y": 720 }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+        """.trimIndent()
+
+        val client = createMockHttpClient {
+            jsonResponse(mockJson)
+        }
+
+        val post = resolver.resolve("https://www.reddit.com/r/travel/comments/gallery123/my_3_vacation_photos/", client)
+
+        assertEquals("gallery123", post.id)
+        assertEquals(3, post.media.size)
+        assertEquals("https://preview.redd.it/photo1.jpg?width=1080&crop=smart&auto=webp", (post.media[0] as Media.Image).url)
+        assertEquals("https://preview.redd.it/photo2.jpg?width=1080&crop=smart&auto=webp", (post.media[1] as Media.Image).url)
+        assertEquals("https://preview.redd.it/photo3.jpg?width=1080&crop=smart&auto=webp", (post.media[2] as Media.Image).url)
     }
 
     @Test

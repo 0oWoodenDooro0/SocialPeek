@@ -3,9 +3,9 @@ package dev.socialpeek.resolver.instagram
 import dev.socialpeek.exception.ParsingException
 import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.*
-import dev.socialpeek.network.KtorSocialPeekHttpClient
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
+import dev.socialpeek.resolver.util.MetaMediaExtractor
 import io.ktor.http.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -19,6 +19,12 @@ class InstagramResolver : PlatformResolver {
         RegexOption.IGNORE_CASE
     )
 
+    companion object {
+        private val INSTAGRAM_HEADERS = mapOf(
+            HttpHeaders.UserAgent to "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+        )
+    }
+
     override fun canResolve(url: String): Boolean {
         return instagramUrlPattern.containsMatchIn(url)
     }
@@ -30,14 +36,11 @@ class InstagramResolver : PlatformResolver {
 
         val canonicalUrl = "https://www.instagram.com/p/$shortcode/"
 
-        // 1. Primary: Try direct post page with Bot User-Agent (Meta renders full OpenGraph SSR)
+        // 1. Primary: Try direct post page with Crawler User-Agent (Meta renders full OpenGraph SSR + JSON)
         try {
-            val botHeaders = mapOf(
-                HttpHeaders.UserAgent to KtorSocialPeekHttpClient.BOT_USER_AGENT
-            )
-            val html = client.get(canonicalUrl, botHeaders)
+            val html = client.get(canonicalUrl, INSTAGRAM_HEADERS)
             val doc = Jsoup.parse(html)
-            val post = parseFromBotOpenGraph(shortcode, canonicalUrl, doc)
+            val post = parseFromBotOpenGraph(shortcode, canonicalUrl, doc, html)
             if (post != null) return post
         } catch (e: Exception) {
             // Fallback to embed
@@ -47,13 +50,20 @@ class InstagramResolver : PlatformResolver {
         return resolveViaEmbed(shortcode, canonicalUrl, url, client)
     }
 
-    private fun parseFromBotOpenGraph(shortcode: String, canonicalUrl: String, doc: Document): PeekPost? {
+    private fun parseFromBotOpenGraph(
+        shortcode: String,
+        canonicalUrl: String,
+        doc: Document,
+        html: String
+    ): PeekPost? {
         val ogTitle = doc.selectFirst("meta[property=og:title]")?.attr("content")
-        val ogImage = doc.selectFirst("meta[property=og:image]")?.attr("content")
+        val ogImages = doc.select("meta[property=og:image]")
+            .mapNotNull { it.attr("content").takeIf { c -> c.isNotBlank() } }
+            .distinct()
         val ogVideo = doc.selectFirst("meta[property=og:video]")?.attr("content")
         val ogDescription = doc.selectFirst("meta[property=og:description]")?.attr("content")
 
-        if (ogTitle.isNullOrBlank() && ogImage.isNullOrBlank()) {
+        if (ogTitle.isNullOrBlank() && ogImages.isEmpty()) {
             return null
         }
 
@@ -87,20 +97,25 @@ class InstagramResolver : PlatformResolver {
         }
 
         val mediaList = mutableListOf<Media>()
-        if (!ogVideo.isNullOrBlank()) {
+        val carouselMedia = MetaMediaExtractor.extractCarouselMedia(html)
+        if (carouselMedia.isNotEmpty()) {
+            mediaList.addAll(carouselMedia)
+        } else if (!ogVideo.isNullOrBlank()) {
             mediaList.add(
                 Media.Video(
                     url = ogVideo,
-                    previewUrl = ogImage
+                    previewUrl = ogImages.firstOrNull()
                 )
             )
-        } else if (!ogImage.isNullOrBlank()) {
-            mediaList.add(
-                Media.Image(
-                    url = ogImage,
-                    previewUrl = ogImage
+        } else {
+            ogImages.forEach { imgUrl ->
+                mediaList.add(
+                    Media.Image(
+                        url = imgUrl,
+                        previewUrl = imgUrl
+                    )
                 )
-            )
+            }
         }
 
         val author = Author(
@@ -167,11 +182,13 @@ class InstagramResolver : PlatformResolver {
                 )
             )
         } else {
-            val imgEl = doc.selectFirst("img.EmbeddedMediaImage")
-            val ogImage = doc.selectFirst("meta[property=og:image]")?.attr("content")
-            val imageUrl = imgEl?.attr("src")?.takeIf { it.isNotBlank() } ?: ogImage
+            val embeddedImages = doc.select("img.EmbeddedMediaImage")
+                .mapNotNull { it.attr("src").takeIf { src -> src.isNotBlank() } }
+            val ogImages = doc.select("meta[property=og:image]")
+                .mapNotNull { it.attr("content").takeIf { c -> c.isNotBlank() } }
 
-            if (!imageUrl.isNullOrBlank()) {
+            val combinedImages = (embeddedImages + ogImages).distinct()
+            combinedImages.forEach { imageUrl ->
                 mediaList.add(
                     Media.Image(
                         url = imageUrl,
@@ -202,9 +219,9 @@ class InstagramResolver : PlatformResolver {
         )
     }
 
-    private fun extractUsernameFromOgTitle(title: String?): String? {
-        if (title.isNullOrBlank()) return null
-        val match = Regex("""(?:Photo|Reel|Video)?\s*(?:by\s+)?([a-zA-Z0-9_.-]+)\s+on Instagram""", RegexOption.IGNORE_CASE).find(title)
-        return match?.groupValues?.get(1)
+    private fun extractUsernameFromOgTitle(ogTitle: String?): String? {
+        if (ogTitle.isNullOrBlank()) return null
+        val match = Regex("""^(.*?)\s+on Instagram""", RegexOption.IGNORE_CASE).find(ogTitle)
+        return match?.groupValues?.get(1)?.trim()?.lowercase()?.replace(" ", "_")
     }
 }

@@ -76,6 +76,38 @@ class XResolverTest {
     }
 
     @Test
+    fun `resolve should parse 4 photos from multi-photo tweet`() = runTest {
+        val mockJson = """
+        {
+            "id_str": "1715438407489569064",
+            "text": "4 photo tweet",
+            "user": {
+                "name": "Photographer",
+                "screen_name": "photo_guy"
+            },
+            "photos": [
+                { "url": "https://pbs.twimg.com/media/pic1.jpg", "width": 1080, "height": 1080 },
+                { "url": "https://pbs.twimg.com/media/pic2.jpg", "width": 1080, "height": 1080 },
+                { "url": "https://pbs.twimg.com/media/pic3.jpg", "width": 1080, "height": 1080 },
+                { "url": "https://pbs.twimg.com/media/pic4.jpg", "width": 1080, "height": 1080 }
+            ]
+        }
+        """.trimIndent()
+
+        val client = createMockHttpClient {
+            jsonResponse(mockJson)
+        }
+
+        val post = resolver.resolve("https://x.com/photo_guy/status/1715438407489569064", client)
+
+        assertEquals(4, post.media.size)
+        assertEquals("https://pbs.twimg.com/media/pic1.jpg", (post.media[0] as Media.Image).url)
+        assertEquals("https://pbs.twimg.com/media/pic2.jpg", (post.media[1] as Media.Image).url)
+        assertEquals("https://pbs.twimg.com/media/pic3.jpg", (post.media[2] as Media.Image).url)
+        assertEquals("https://pbs.twimg.com/media/pic4.jpg", (post.media[3] as Media.Image).url)
+    }
+
+    @Test
     fun `resolve should parse video tweet and select highest bitrate mp4`() = runTest {
         val mockJson = """
         {

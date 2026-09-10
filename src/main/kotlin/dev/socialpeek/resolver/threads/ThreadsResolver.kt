@@ -3,9 +3,9 @@ package dev.socialpeek.resolver.threads
 import dev.socialpeek.exception.ParsingException
 import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.*
-import dev.socialpeek.network.KtorSocialPeekHttpClient
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
+import dev.socialpeek.resolver.util.MetaMediaExtractor
 import io.ktor.http.*
 import org.jsoup.Jsoup
 
@@ -23,6 +23,12 @@ class ThreadsResolver : PlatformResolver {
         RegexOption.IGNORE_CASE
     )
 
+    companion object {
+        val THREADS_HEADERS = mapOf(
+            HttpHeaders.UserAgent to "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+        )
+    }
+
     override fun canResolve(url: String): Boolean {
         return threadsUrlPattern.containsMatchIn(url) || threadsSharePattern.containsMatchIn(url)
     }
@@ -31,7 +37,7 @@ class ThreadsResolver : PlatformResolver {
         var currentUrl = url
         if (threadsSharePattern.containsMatchIn(url)) {
             currentUrl = try {
-                client.resolveFinalUrl(url, mapOf(HttpHeaders.UserAgent to KtorSocialPeekHttpClient.META_USER_AGENT))
+                client.resolveFinalUrl(url, THREADS_HEADERS)
             } catch (e: Exception) {
                 url
             }
@@ -49,12 +55,8 @@ class ThreadsResolver : PlatformResolver {
             "https://www.threads.net/t/$postId"
         }
 
-        val headers = mapOf(
-            HttpHeaders.UserAgent to KtorSocialPeekHttpClient.META_USER_AGENT
-        )
-
         val html = try {
-            client.get(targetUrl, headers)
+            client.get(targetUrl, THREADS_HEADERS)
         } catch (e: PostNotFoundException) {
             throw e
         } catch (e: Exception) {
@@ -65,38 +67,67 @@ class ThreadsResolver : PlatformResolver {
 
         val ogTitle = doc.selectFirst("meta[property=og:title]")?.attr("content")
         val ogDescription = doc.selectFirst("meta[property=og:description]")?.attr("content")
-        val ogImage = doc.selectFirst("meta[property=og:image]")?.attr("content")
+        val ogImages = doc.select("meta[property=og:image]")
+            .mapNotNull { it.attr("content").takeIf { c -> c.isNotBlank() } }
+            .distinct()
         val ogVideo = doc.selectFirst("meta[property=og:video]")?.attr("content")
+        val twitterCard = doc.selectFirst("meta[name=twitter:card]")?.attr("content")
+        val ogImageWidth = doc.selectFirst("meta[property=og:image:width]")?.attr("content")?.toIntOrNull()
+        val ogImageHeight = doc.selectFirst("meta[property=og:image:height]")?.attr("content")?.toIntOrNull()
 
-        if (ogTitle.isNullOrBlank() && ogDescription.isNullOrBlank() && ogImage.isNullOrBlank()) {
+        if (ogTitle.isNullOrBlank() && ogDescription.isNullOrBlank() && ogImages.isEmpty()) {
             throw PostNotFoundException(url, "Threads post not found or empty response")
         }
 
-        val (username, displayName) = extractUser(ogTitle, urlUsername)
+        val (username, initialDisplayName) = extractUser(ogTitle, urlUsername)
+        val scriptAuthor = MetaMediaExtractor.extractAuthor(html, username)
 
+        var avatarUrl = scriptAuthor?.avatarUrl
+        if (avatarUrl == null) {
+            avatarUrl = ogImages.firstOrNull { isProfilePic(it) }
+        }
+
+        val displayName = scriptAuthor?.displayName ?: initialDisplayName ?: username
+        val isVerified = scriptAuthor?.isVerified ?: false
         val content = ogDescription ?: ""
         val mediaList = mutableListOf<Media>()
 
-        if (!ogVideo.isNullOrBlank()) {
-            mediaList.add(
-                Media.Video(
-                    url = ogVideo,
-                    previewUrl = ogImage
+        // 1. Try extracting multi-image/video carousel from Meta SSR script
+        val carouselMedia = MetaMediaExtractor.extractCarouselMedia(html)
+        if (carouselMedia.isNotEmpty()) {
+            mediaList.addAll(carouselMedia)
+        } else {
+            // 2. Fallback to OpenGraph tags
+            if (!ogVideo.isNullOrBlank()) {
+                val preview = ogImages.firstOrNull { !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard) && !isProfilePic(it) }
+                mediaList.add(
+                    Media.Video(
+                        url = ogVideo,
+                        previewUrl = preview
+                    )
                 )
-            )
-        } else if (!ogImage.isNullOrBlank()) {
-            mediaList.add(
-                Media.Image(
-                    url = ogImage,
-                    previewUrl = ogImage
-                )
-            )
+            } else if (!twitterCard.equals("summary", ignoreCase = true)) {
+                val validImages = ogImages.filter {
+                    !isProfilePic(it) && !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard)
+                }
+                validImages.forEachIndexed { index, imgUrl ->
+                    mediaList.add(
+                        Media.Image(
+                            url = imgUrl,
+                            previewUrl = imgUrl,
+                            width = if (index == 0) ogImageWidth else null,
+                            height = if (index == 0) ogImageHeight else null
+                        )
+                    )
+                }
+            }
         }
 
         val author = Author(
             username = username,
-            displayName = displayName ?: username,
-            avatarUrl = null,
+            displayName = displayName,
+            avatarUrl = avatarUrl,
+            isVerified = isVerified,
             profileUrl = "https://www.threads.net/@$username"
         )
 
@@ -110,19 +141,59 @@ class ThreadsResolver : PlatformResolver {
         )
     }
 
+    private fun isProfilePic(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("/t51.82787-19/") ||
+                lower.contains("/t51.2885-19/") ||
+                lower.contains("profile_pic") ||
+                lower.contains("eyj2zw5jb2rlx3rhzyi6inpvbglszv9wawm")
+    }
+
+    private fun isPlatformShareCard(url: String, width: Int?, height: Int?, twitterCard: String?): Boolean {
+        val lower = url.lowercase()
+        if (lower.contains("share.threads.net") || lower.contains("/t39.92108-6/")) {
+            return true
+        }
+        if (width == 1200 && height == 628 && (lower.contains("t39.") || (lower.contains("fbcdn.net") && !lower.contains("t51.")))) {
+            return true
+        }
+        return false
+    }
+
     private fun extractUser(ogTitle: String?, fallbackUsername: String?): Pair<String, String?> {
         if (ogTitle.isNullOrBlank()) {
-            val u = fallbackUsername ?: "threads_user"
-            return u to u
+            val user = fallbackUsername ?: "unknown"
+            return Pair(user, user)
         }
-        val match = Regex("""^(.*?)\s*\(@([a-zA-Z0-9_.-]+)\)\s*on Threads""", RegexOption.IGNORE_CASE).find(ogTitle)
-        return if (match != null) {
-            val name = match.groupValues[1].trim()
-            val handle = match.groupValues[2].trim()
-            handle to (name.ifBlank { handle })
-        } else {
-            val u = fallbackUsername ?: "threads_user"
-            u to u
+
+        // Patterns:
+        // "Mark Zuckerberg (@zuck) on Threads"
+        // "Name (@username) on Threads"
+        val regexWithDisplay = Regex("""^(.*?)\s+\(@([a-zA-Z0-9_.-]+)\)\s+on\s+Threads""", RegexOption.IGNORE_CASE)
+        val matchWithDisplay = regexWithDisplay.find(ogTitle)
+        if (matchWithDisplay != null) {
+            val displayName = matchWithDisplay.groupValues[1].trim()
+            val username = matchWithDisplay.groupValues[2].trim()
+            return Pair(username, displayName)
         }
+
+        // "@username on Threads"
+        val regexUserOnly = Regex("""^@([a-zA-Z0-9_.-]+)\s+on\s+Threads""", RegexOption.IGNORE_CASE)
+        val matchUserOnly = regexUserOnly.find(ogTitle)
+        if (matchUserOnly != null) {
+            val username = matchUserOnly.groupValues[1].trim()
+            return Pair(username, null)
+        }
+
+        // Fallback: search for (@username) anywhere in ogTitle
+        val handleMatch = Regex("""\(@([a-zA-Z0-9_.-]+)\)""").find(ogTitle)
+        if (handleMatch != null) {
+            val username = handleMatch.groupValues[1].trim()
+            val prefix = ogTitle.substringBefore(handleMatch.value).trim()
+            return Pair(username, prefix.takeIf { it.isNotBlank() })
+        }
+
+        val user = fallbackUsername ?: "unknown"
+        return Pair(user, ogTitle)
     }
 }
