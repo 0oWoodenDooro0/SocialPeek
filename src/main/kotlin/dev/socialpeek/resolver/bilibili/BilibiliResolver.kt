@@ -5,6 +5,7 @@ import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.*
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
+import io.ktor.http.*
 import kotlinx.serialization.json.*
 
 class BilibiliResolver : PlatformResolver {
@@ -15,6 +16,13 @@ class BilibiliResolver : PlatformResolver {
     private val avPattern = Regex("""(?:bilibili\.com/video/|b23\.tv/)av([0-9]+)""", RegexOption.IGNORE_CASE)
     private val opusPattern = Regex("""(?:bilibili\.com/opus/|t\.bilibili\.com/)([0-9]+)""", RegexOption.IGNORE_CASE)
     private val b23Pattern = Regex("""https?://b23\.tv/[a-zA-Z0-9]+""", RegexOption.IGNORE_CASE)
+
+    companion object {
+        val BILIBILI_HEADERS: Map<String, String> = mapOf(
+            HttpHeaders.UserAgent to "SocialPeek/1.0 (https://github.com/0oWoodenDooro0/SocialPeek)",
+            "Referer" to "https://www.bilibili.com/"
+        )
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -30,8 +38,8 @@ class BilibiliResolver : PlatformResolver {
 
     override suspend fun resolve(url: String, client: SocialPeekHttpClient): PeekPost {
         var currentUrl = url
-        // Expand b23.tv short link if it doesn't already have an ID
-        if (b23Pattern.matches(url) && !bvPattern.containsMatchIn(url) && !avPattern.containsMatchIn(url) && !opusPattern.containsMatchIn(url)) {
+        // Expand b23.tv short link if it doesn't already have a video/opus ID in the path
+        if (b23Pattern.containsMatchIn(url) && !bvPattern.containsMatchIn(url) && !avPattern.containsMatchIn(url) && !opusPattern.containsMatchIn(url)) {
             currentUrl = try {
                 client.resolveFinalUrl(url)
             } catch (e: Exception) {
@@ -47,7 +55,7 @@ class BilibiliResolver : PlatformResolver {
             bvMatch != null -> resolveVideo(bvid = bvMatch.groupValues[1], aid = null, originalUrl = currentUrl, client = client)
             avMatch != null -> resolveVideo(bvid = null, aid = avMatch.groupValues[1], originalUrl = currentUrl, client = client)
             opusMatch != null -> resolveOpus(opusId = opusMatch.groupValues[1], originalUrl = currentUrl, client = client)
-            else -> throw ParsingException(currentUrl, "Unsupported Bilibili URL format")
+            else -> throw ParsingException(currentUrl, "Unsupported Bilibili URL format: $currentUrl")
         }
     }
 
@@ -61,7 +69,7 @@ class BilibiliResolver : PlatformResolver {
         val apiUrl = "https://api.bilibili.com/x/web-interface/view?$queryParam"
 
         val responseText = try {
-            client.get(apiUrl)
+            client.get(apiUrl, BILIBILI_HEADERS)
         } catch (e: Exception) {
             throw PostNotFoundException(originalUrl, e.message)
         }
@@ -147,7 +155,7 @@ class BilibiliResolver : PlatformResolver {
         val apiUrl = "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=$opusId"
 
         val responseText = try {
-            client.get(apiUrl)
+            client.get(apiUrl, BILIBILI_HEADERS)
         } catch (e: Exception) {
             throw PostNotFoundException(originalUrl, e.message)
         }
