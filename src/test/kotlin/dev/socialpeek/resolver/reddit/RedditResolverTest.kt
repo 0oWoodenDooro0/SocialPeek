@@ -69,7 +69,11 @@ class RedditResolverTest {
         assertEquals("SocialPeek Released!", post.title)
         assertEquals("A brand new social media metadata parser for Kotlin.", post.content)
         assertEquals("kotlin_dev", post.author.username)
+        assertEquals("u/kotlin_dev", post.author.displayName)
         assertEquals("https://www.reddit.com/user/kotlin_dev", post.author.profileUrl)
+        assertEquals("kotlindev", post.community)
+        assertEquals("kotlindev", post.subreddit)
+        assertEquals("kotlindev", post.board)
         assertEquals(350, post.metrics?.likes)
         assertEquals(42, post.metrics?.comments)
         assertEquals(1715000000L, post.createdAtEpochSeconds)
@@ -77,18 +81,30 @@ class RedditResolverTest {
     }
 
     @Test
-    fun `resolve should fallback to oEmbed when JSON API fails`() = runTest {
+    fun `resolve should fallback to oEmbed and Bot OpenGraph when JSON API fails`() = runTest {
         val oEmbedJson = """
         {
             "title": "Account Disabled",
             "author_name": "xethorn",
-            "provider_name": "Reddit"
+            "html": "<blockquote class=\"reddit-embed-bq\"><a href=\"https://www.reddit.com/r/google_antigravity/comments/1wbqdaj/\">Post</a> in <a href=\"https://www.reddit.com/r/google_antigravity/\">google_antigravity</a></blockquote>"
         }
+        """.trimIndent()
+
+        val botHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="description" content="197 votes, 138 comments. My account has been disabled." />
+            <meta property="og:image" content="https://share.redd.it/preview/post/1wbqdaj" />
+        </head>
+        </html>
         """.trimIndent()
 
         val client = createMockHttpClient { request ->
             if (request.url.encodedPath.contains("oembed")) {
                 jsonResponse(oEmbedJson)
+            } else if (request.url.encodedPath.contains("comments/1wbqdaj")) {
+                htmlResponse(botHtml)
             } else {
                 respond("Blocked", HttpStatusCode.Forbidden)
             }
@@ -100,12 +116,17 @@ class RedditResolverTest {
         assertEquals("1wbqdaj", post.id)
         assertEquals("Account Disabled", post.title)
         assertEquals("xethorn", post.author.username)
-        assertEquals("https://www.reddit.com/user/xethorn", post.author.profileUrl)
+        assertEquals("google_antigravity", post.community)
+        assertEquals("google_antigravity", post.subreddit)
+        assertEquals("google_antigravity", post.board)
+        assertEquals("My account has been disabled.", post.content)
+        assertEquals(197L, post.metrics?.likes)
+        assertEquals(138L, post.metrics?.comments)
         assertEquals(1, post.media.size)
     }
 
     @Test
-    fun `resolve should follow redirect for share link and fallback to oEmbed`() = runTest {
+    fun `resolve should follow redirect for share link and extract community`() = runTest {
         val oEmbedJson = """
         {
             "title": "Account Disabled",
@@ -132,6 +153,8 @@ class RedditResolverTest {
         assertEquals("1wbqdaj", post.id)
         assertEquals("Account Disabled", post.title)
         assertEquals("xethorn", post.author.username)
+        assertEquals("google_antigravity", post.community)
+        assertEquals("google_antigravity", post.subreddit)
     }
 
     @Test

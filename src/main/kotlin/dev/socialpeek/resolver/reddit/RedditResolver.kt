@@ -44,7 +44,7 @@ class RedditResolver : PlatformResolver {
             }
         }
 
-        val (subreddit, postId) = extractSubredditAndPostId(targetUrl)
+        var (subreddit, postId) = extractSubredditAndPostId(targetUrl)
             ?: throw ParsingException(targetUrl, "Could not extract Reddit post ID from URL: $targetUrl")
 
         // 1. Clean canonical URL (without tracking query params)
@@ -60,13 +60,8 @@ class RedditResolver : PlatformResolver {
             val responseText = client.get(jsonApiUrl)
             return parseFromJson(responseText, cleanUrl)
         } catch (e: Exception) {
-            // 3. Fallback to oEmbed with full cleanUrl
-            try {
-                return resolveViaOEmbed(postId, cleanUrl, client)
-            } catch (e2: Exception) {
-                // 4. Fallback to Bot OpenGraph HTML
-                return resolveViaOpenGraph(postId, cleanUrl, client)
-            }
+            // 3. Fallback to combining oEmbed + Bot OpenGraph
+            return resolveFallback(postId, cleanUrl, subreddit, client)
         }
     }
 
@@ -120,7 +115,7 @@ class RedditResolver : PlatformResolver {
 
         val author = Author(
             username = authorName,
-            displayName = if (subreddit != null) "r/$subreddit" else authorName,
+            displayName = "u/$authorName",
             profileUrl = "https://www.reddit.com/user/$authorName"
         )
 
@@ -197,6 +192,13 @@ class RedditResolver : PlatformResolver {
             }
         }
 
+        val rawMap = mutableMapOf<String, String>()
+        if (subreddit != null) {
+            rawMap["subreddit"] = subreddit
+            rawMap["board"] = subreddit
+            rawMap["community"] = subreddit
+        }
+
         return PeekPost(
             platform = Platform.REDDIT,
             id = id,
@@ -206,31 +208,103 @@ class RedditResolver : PlatformResolver {
             content = content,
             media = mediaList,
             metrics = Metrics(likes = upvotes, comments = numComments),
-            createdAtEpochSeconds = createdUtc
+            createdAtEpochSeconds = createdUtc,
+            community = subreddit,
+            rawData = rawMap
         )
     }
 
-    private suspend fun resolveViaOEmbed(postId: String, cleanUrl: String, client: SocialPeekHttpClient): PeekPost {
-        val encodedUrl = URLEncoder.encode(cleanUrl, "UTF-8")
-        val oembedUrl = "https://www.reddit.com/oembed?url=$encodedUrl"
-        val responseText = client.get(oembedUrl)
+    private suspend fun resolveFallback(
+        postId: String,
+        cleanUrl: String,
+        initialSubreddit: String?,
+        client: SocialPeekHttpClient
+    ): PeekPost {
+        // 1. Fetch oEmbed (gives author_name, title, and html with subreddit)
+        var authorName: String? = null
+        var oembedTitle: String? = null
+        var foundSubreddit: String? = initialSubreddit
 
-        val rootObj = try {
-            json.parseToJsonElement(responseText).jsonObject
-        } catch (e: Exception) {
-            throw PostNotFoundException(cleanUrl, "Invalid oEmbed JSON")
+        try {
+            val encodedUrl = URLEncoder.encode(cleanUrl, "UTF-8")
+            val oembedUrl = "https://www.reddit.com/oembed?url=$encodedUrl"
+            val responseText = client.get(oembedUrl)
+            val rootObj = json.parseToJsonElement(responseText).jsonObject
+
+            authorName = rootObj["author_name"]?.jsonPrimitive?.contentOrNull
+            oembedTitle = rootObj["title"]?.jsonPrimitive?.contentOrNull
+
+            val html = rootObj["html"]?.jsonPrimitive?.contentOrNull
+            if (html != null && foundSubreddit == null) {
+                val subMatch = Regex("""/r/([a-zA-Z0-9_]+)/""").find(html)
+                if (subMatch != null) {
+                    foundSubreddit = subMatch.groupValues[1]
+                }
+            }
+        } catch (_: Exception) {
+            // Ignore oEmbed failure and continue to HTML scraping
         }
 
-        val title = rootObj["title"]?.jsonPrimitive?.contentOrNull ?: "Reddit Post"
-        val authorName = rootObj["author_name"]?.jsonPrimitive?.contentOrNull ?: "reddit_user"
+        // 2. Fetch Bot OpenGraph HTML (gives meta description with votes, comments, content, and og:image)
+        var scrapedTitle: String? = null
+        var scrapedContent = ""
+        var scrapedVotes: Long? = null
+        var scrapedComments: Long? = null
+        var scrapedImage: String? = null
+
+        try {
+            val headers = mapOf(
+                HttpHeaders.UserAgent to KtorSocialPeekHttpClient.BOT_USER_AGENT
+            )
+            val html = client.get(cleanUrl, headers)
+            val doc = Jsoup.parse(html)
+
+            val ogTitle = doc.selectFirst("meta[property=og:title]")?.attr("content")
+            if (!ogTitle.isNullOrBlank()) {
+                val subMatch = Regex("""From the ([a-zA-Z0-9_]+) community on Reddit""", RegexOption.IGNORE_CASE).find(ogTitle)
+                if (subMatch != null && foundSubreddit == null) {
+                    foundSubreddit = subMatch.groupValues[1]
+                }
+                scrapedTitle = ogTitle.replace(Regex("""^From the \w+ community on Reddit:\s*"""), "")
+            }
+
+            val metaDesc = doc.selectFirst("meta[name=description]")?.attr("content")
+            if (!metaDesc.isNullOrBlank()) {
+                // Example: "197 votes, 138 comments. I'm using antigravity and this morning, my entire Google Account..."
+                val descRegex = Regex("""^(?:([0-9,]+)\s*votes?,\s*)?(?:([0-9,]+)\s*comments?\.\s*)?(.*)$""", RegexOption.DOT_MATCHES_ALL)
+                val descMatch = descRegex.find(metaDesc)
+                if (descMatch != null) {
+                    val votesStr = descMatch.groupValues[1].replace(",", "").trim()
+                    val commentsStr = descMatch.groupValues[2].replace(",", "").trim()
+                    val body = descMatch.groupValues[3].trim()
+
+                    if (votesStr.isNotBlank()) scrapedVotes = votesStr.toLongOrNull()
+                    if (commentsStr.isNotBlank()) scrapedComments = commentsStr.toLongOrNull()
+                    scrapedContent = body
+                } else {
+                    scrapedContent = metaDesc
+                }
+            }
+
+            scrapedImage = doc.selectFirst("meta[property=og:image]")?.attr("content")
+        } catch (_: Exception) {
+            // Ignore HTML scrape failure if oEmbed succeeded
+        }
+
+        val finalTitle = oembedTitle ?: scrapedTitle
+        val finalAuthorName = authorName ?: "reddit_user"
+
+        if (finalTitle.isNullOrBlank() && scrapedContent.isBlank() && authorName == null) {
+            throw PostNotFoundException(cleanUrl, "Post not found or inaccessible on Reddit")
+        }
 
         val author = Author(
-            username = authorName,
-            displayName = authorName,
-            profileUrl = "https://www.reddit.com/user/$authorName"
+            username = finalAuthorName,
+            displayName = "u/$finalAuthorName",
+            profileUrl = "https://www.reddit.com/user/$finalAuthorName"
         )
 
-        val previewImageUrl = "https://share.redd.it/preview/post/$postId"
+        val previewImageUrl = scrapedImage ?: "https://share.redd.it/preview/post/$postId"
         val mediaList = listOf(
             Media.Image(
                 url = previewImageUrl,
@@ -238,63 +312,24 @@ class RedditResolver : PlatformResolver {
             )
         )
 
-        return PeekPost(
-            platform = Platform.REDDIT,
-            id = postId,
-            originalUrl = cleanUrl,
-            author = author,
-            title = title,
-            content = "",
-            media = mediaList
-        )
-    }
-
-    private suspend fun resolveViaOpenGraph(postId: String, cleanUrl: String, client: SocialPeekHttpClient): PeekPost {
-        val headers = mapOf(
-            HttpHeaders.UserAgent to KtorSocialPeekHttpClient.BOT_USER_AGENT
-        )
-        val html = try {
-            client.get(cleanUrl, headers)
-        } catch (e: Exception) {
-            throw PostNotFoundException(cleanUrl, "Post not found on Reddit: ${e.message}")
+        val rawMap = mutableMapOf<String, String>()
+        if (foundSubreddit != null) {
+            rawMap["subreddit"] = foundSubreddit
+            rawMap["board"] = foundSubreddit
+            rawMap["community"] = foundSubreddit
         }
-
-        val doc = Jsoup.parse(html)
-
-        val ogTitle = doc.selectFirst("meta[property=og:title]")?.attr("content")
-        val ogImage = doc.selectFirst("meta[property=og:image]")?.attr("content")
-        val ogDesc = doc.selectFirst("meta[property=og:description]")?.attr("content")
-
-        if (ogTitle.isNullOrBlank() && ogDesc.isNullOrBlank()) {
-            throw PostNotFoundException(cleanUrl, "Reddit post not found or empty response")
-        }
-
-        val title = if (!ogTitle.isNullOrBlank()) {
-            ogTitle.replace(Regex("""^From the \w+ community on Reddit:\s*"""), "")
-        } else "Reddit Post"
-
-        val author = Author(
-            username = "reddit_user",
-            displayName = "Reddit",
-            profileUrl = cleanUrl
-        )
-
-        val previewImage = ogImage ?: "https://share.redd.it/preview/post/$postId"
-        val mediaList = listOf(
-            Media.Image(
-                url = previewImage,
-                previewUrl = previewImage
-            )
-        )
 
         return PeekPost(
             platform = Platform.REDDIT,
             id = postId,
             originalUrl = cleanUrl,
             author = author,
-            title = title,
-            content = ogDesc ?: "",
-            media = mediaList
+            title = finalTitle ?: "Reddit Post",
+            content = scrapedContent,
+            media = mediaList,
+            metrics = Metrics(likes = scrapedVotes, comments = scrapedComments),
+            community = foundSubreddit,
+            rawData = rawMap
         )
     }
 }

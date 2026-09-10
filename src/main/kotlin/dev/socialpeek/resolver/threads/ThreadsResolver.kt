@@ -31,7 +31,7 @@ class ThreadsResolver : PlatformResolver {
         var currentUrl = url
         if (threadsSharePattern.containsMatchIn(url)) {
             currentUrl = try {
-                client.resolveFinalUrl(url, mapOf(HttpHeaders.UserAgent to KtorSocialPeekHttpClient.BOT_USER_AGENT))
+                client.resolveFinalUrl(url, mapOf(HttpHeaders.UserAgent to KtorSocialPeekHttpClient.META_USER_AGENT))
             } catch (e: Exception) {
                 url
             }
@@ -50,7 +50,7 @@ class ThreadsResolver : PlatformResolver {
         }
 
         val headers = mapOf(
-            HttpHeaders.UserAgent to KtorSocialPeekHttpClient.BOT_USER_AGENT
+            HttpHeaders.UserAgent to KtorSocialPeekHttpClient.META_USER_AGENT
         )
 
         val html = try {

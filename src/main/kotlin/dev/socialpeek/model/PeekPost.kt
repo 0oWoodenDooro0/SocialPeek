@@ -13,5 +13,9 @@ data class PeekPost(
     val media: List<Media> = emptyList(),
     val metrics: Metrics? = null,
     val createdAtEpochSeconds: Long? = null,
+    val community: String? = null,
     val rawData: Map<String, String> = emptyMap()
-)
+) {
+    val board: String? get() = community
+    val subreddit: String? get() = community
+}
