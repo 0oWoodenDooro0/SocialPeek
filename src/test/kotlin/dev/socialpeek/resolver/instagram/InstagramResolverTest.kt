@@ -30,7 +30,42 @@ class InstagramResolverTest {
     }
 
     @Test
-    fun `resolve should parse instagram image post from embed page`() = runTest {
+    fun `resolve should parse instagram post via Bot OpenGraph SSR`() = runTest {
+        val botHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:title" content="John Doe on Instagram: &quot;Beautiful sunset in Tokyo!&quot;" />
+            <meta property="og:description" content="1,200 likes, 45 comments - johndoe on March 15, 2026: &quot;Beautiful sunset in Tokyo!&quot;" />
+            <meta property="og:image" content="https://instagram.fxxx.fbcdn.net/sunset.jpg" />
+        </head>
+        </html>
+        """.trimIndent()
+
+        val client = createMockHttpClient { request ->
+            if (request.url.encodedPath == "/p/Cx12345abc/") {
+                htmlResponse(botHtml)
+            } else {
+                htmlResponse("Not found", HttpStatusCode.NotFound)
+            }
+        }
+
+        val post = resolver.resolve("https://www.instagram.com/p/Cx12345abc/", client)
+
+        assertEquals(Platform.INSTAGRAM, post.platform)
+        assertEquals("Cx12345abc", post.id)
+        assertEquals("johndoe", post.author.username)
+        assertEquals("John Doe", post.author.displayName)
+        assertEquals("Beautiful sunset in Tokyo!", post.content)
+        assertEquals(1200L, post.metrics?.likes)
+        assertEquals(45L, post.metrics?.comments)
+        assertEquals(1, post.media.size)
+        val image = post.media.first() as Media.Image
+        assertEquals("https://instagram.fxxx.fbcdn.net/sunset.jpg", image.url)
+    }
+
+    @Test
+    fun `resolve should fallback to embed page when direct bot request fails`() = runTest {
         val embedHtml = """
         <!DOCTYPE html>
         <html>
@@ -53,8 +88,11 @@ class InstagramResolverTest {
         """.trimIndent()
 
         val client = createMockHttpClient { request ->
-            assertTrue(request.url.encodedPath.contains("embed/captioned"))
-            htmlResponse(embedHtml)
+            if (request.url.encodedPath.contains("embed/captioned")) {
+                htmlResponse(embedHtml)
+            } else {
+                htmlResponse("Not found", HttpStatusCode.NotFound)
+            }
         }
 
         val post = resolver.resolve("https://www.instagram.com/share/p/Cx12345abc/", client)
@@ -71,47 +109,52 @@ class InstagramResolverTest {
     }
 
     @Test
-    fun `resolve should parse instagram reel with video`() = runTest {
+    fun `resolve should parse instagram reel video post from embed page`() = runTest {
         val embedHtml = """
         <!DOCTYPE html>
         <html>
         <head>
-            <meta property="og:title" content="Reel by jane_dancer on Instagram" />
-            <meta property="og:description" content="New dance routine! 💃" />
+            <meta property="og:title" content="Reel by cool_creator on Instagram" />
+            <meta property="og:description" content="Check out my new reel!" />
             <meta property="og:image" content="https://instagram.fxxx.fbcdn.net/poster.jpg" />
-            <meta property="og:video" content="https://instagram.fxxx.fbcdn.net/dance.mp4" />
+            <meta property="og:video" content="https://instagram.fxxx.fbcdn.net/video.mp4" />
         </head>
         <body>
             <div class="Caption">
-                <a class="CaptionUsername" href="/jane_dancer/">jane_dancer</a>
+                <a class="CaptionUsername" href="/cool_creator/">cool_creator</a>
+                <span class="CaptionComments">Check out my new reel!</span>
             </div>
-            <video class="EmbeddedMediaVideo" src="https://instagram.fxxx.fbcdn.net/dance.mp4" poster="https://instagram.fxxx.fbcdn.net/poster.jpg"></video>
+            <video src="https://instagram.fxxx.fbcdn.net/video.mp4" poster="https://instagram.fxxx.fbcdn.net/poster.jpg"></video>
         </body>
         </html>
         """.trimIndent()
 
-        val client = createMockHttpClient {
-            htmlResponse(embedHtml)
+        val client = createMockHttpClient { request ->
+            if (request.url.encodedPath.contains("embed/captioned")) {
+                htmlResponse(embedHtml)
+            } else {
+                htmlResponse("Not found", HttpStatusCode.NotFound)
+            }
         }
 
-        val post = resolver.resolve("https://instagram.com/reel/Cx12345abc/", client)
+        val post = resolver.resolve("https://www.instagram.com/reel/CxReel123/", client)
 
-        assertEquals(Platform.INSTAGRAM, post.platform)
-        assertEquals("jane_dancer", post.author.username)
+        assertEquals("CxReel123", post.id)
+        assertEquals("cool_creator", post.author.username)
         assertEquals(1, post.media.size)
         val video = post.media.first() as Media.Video
-        assertEquals("https://instagram.fxxx.fbcdn.net/dance.mp4", video.url)
+        assertEquals("https://instagram.fxxx.fbcdn.net/video.mp4", video.url)
         assertEquals("https://instagram.fxxx.fbcdn.net/poster.jpg", video.previewUrl)
     }
 
     @Test
-    fun `resolve should throw PostNotFoundException on 404 response`() = runTest {
+    fun `resolve should throw PostNotFoundException when embed page returns 404`() = runTest {
         val client = createMockHttpClient {
-            htmlResponse("Not Found", status = HttpStatusCode.NotFound)
+            htmlResponse("Not found", HttpStatusCode.NotFound)
         }
 
         assertFailsWith<PostNotFoundException> {
-            resolver.resolve("https://www.instagram.com/p/invalid/", client)
+            resolver.resolve("https://www.instagram.com/p/NotExist123/", client)
         }
     }
 }

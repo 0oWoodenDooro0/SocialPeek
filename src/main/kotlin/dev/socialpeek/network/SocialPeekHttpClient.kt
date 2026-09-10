@@ -12,7 +12,7 @@ import io.ktor.http.*
 
 interface SocialPeekHttpClient {
     suspend fun get(url: String, headers: Map<String, String> = emptyMap()): String
-    suspend fun resolveFinalUrl(url: String): String
+    suspend fun resolveFinalUrl(url: String, headers: Map<String, String> = emptyMap()): String
 }
 
 class KtorSocialPeekHttpClient(
@@ -57,10 +57,13 @@ class KtorSocialPeekHttpClient(
         return response.bodyAsText()
     }
 
-    override suspend fun resolveFinalUrl(url: String): String {
+    override suspend fun resolveFinalUrl(url: String, headers: Map<String, String>): String {
         val response = ktor.get(url) {
             headers {
-                append(HttpHeaders.UserAgent, defaultUserAgent)
+                if (!headers.containsKey(HttpHeaders.UserAgent)) {
+                    append(HttpHeaders.UserAgent, defaultUserAgent)
+                }
+                headers.forEach { (k, v) -> append(k, v) }
             }
         }
         return response.request.url.toString()

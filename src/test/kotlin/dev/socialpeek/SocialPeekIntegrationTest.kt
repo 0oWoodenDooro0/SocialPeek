@@ -34,6 +34,7 @@ class SocialPeekIntegrationTest {
         assertEquals(Platform.INSTAGRAM, client.findResolver("https://www.instagram.com/p/Cx12345abc/")?.platform)
         assertEquals(Platform.INSTAGRAM, client.findResolver("https://instagram.com/share/p/Cx12345abc/")?.platform)
         assertEquals(Platform.THREADS, client.findResolver("https://www.threads.net/@zuck/post/CuZ12345")?.platform)
+        assertEquals(Platform.THREADS, client.findResolver("https://www.threads.com/share/BAENHoOpq1/")?.platform)
         assertEquals(Platform.YOUTUBE, client.findResolver("https://youtu.be/dQw4w9WgXcQ")?.platform)
         assertEquals(Platform.YOUTUBE, client.findResolver("https://www.youtube.com/live/SyG1rbuHB9A")?.platform)
         assertEquals(Platform.REDDIT, client.findResolver("https://redd.it/1cdefgh")?.platform)
@@ -46,6 +47,7 @@ class SocialPeekIntegrationTest {
         assertTrue(SocialPeek.canResolve("https://x.com/jack/status/20"))
         assertTrue(SocialPeek.canResolve("https://bilibili.com/opus/12345"))
         assertTrue(SocialPeek.canResolve("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE"))
+        assertTrue(SocialPeek.canResolve("https://www.threads.com/share/BAENHoOpq1/"))
         assertTrue(SocialPeek.canResolve("https://www.youtube.com/live/SyG1rbuHB9A"))
     }
 }

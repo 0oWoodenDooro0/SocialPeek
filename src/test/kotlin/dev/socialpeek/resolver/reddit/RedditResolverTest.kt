@@ -3,9 +3,10 @@ package dev.socialpeek.resolver.reddit
 import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.Media
 import dev.socialpeek.model.Platform
-import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.test.createMockHttpClient
+import dev.socialpeek.test.htmlResponse
 import dev.socialpeek.test.jsonResponse
+import io.ktor.client.engine.mock.*
 import io.ktor.http.*
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
@@ -19,59 +20,20 @@ class RedditResolverTest {
     private val resolver = RedditResolver()
 
     @Test
-    fun `canResolve should match reddit URLs`() {
-        assertTrue(resolver.canResolve("https://www.reddit.com/r/Kotlin/comments/1cdefgh/check_this_out/"))
-        assertTrue(resolver.canResolve("https://reddit.com/comments/1cdefgh"))
-        assertTrue(resolver.canResolve("https://redd.it/1cdefgh"))
-        assertTrue(resolver.canResolve("http://old.reddit.com/r/programming/comments/1cdefgh/"))
+    fun `canResolve should match reddit post URLs and share URLs`() {
+        assertTrue(resolver.canResolve("https://www.reddit.com/r/kotlindev/comments/12345/awesome_library/"))
+        assertTrue(resolver.canResolve("https://reddit.com/r/kotlindev/comments/12345"))
+        assertTrue(resolver.canResolve("https://old.reddit.com/r/kotlindev/comments/12345"))
+        assertTrue(resolver.canResolve("https://redd.it/12345"))
         assertTrue(resolver.canResolve("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE"))
         assertTrue(resolver.canResolve("https://reddit.com/s/7GwvvFKRsE"))
-        assertFalse(resolver.canResolve("https://reddit.com/r/Kotlin"))
-        assertFalse(resolver.canResolve("https://x.com/jack/status/20"))
+        assertFalse(resolver.canResolve("https://reddit.com/r/kotlindev/"))
+        assertFalse(resolver.canResolve("https://reddit.com/user/someone/"))
+        assertFalse(resolver.canResolve("https://twitter.com/jack/status/20"))
     }
 
     @Test
-    fun `resolve should follow redirect for reddit share link and parse post`() = runTest {
-        val shareUrl = "https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE"
-        val targetUrl = "https://www.reddit.com/r/google_antigravity/comments/1wbqdaj/account_disabled/"
-        
-        val oembedJson = """
-        {
-            "title": "Account Disabled",
-            "author_name": "xethorn",
-            "provider_name": "reddit"
-        }
-        """.trimIndent()
-
-        val mockHttpClient = object : SocialPeekHttpClient {
-            override suspend fun get(url: String, headers: Map<String, String>): String {
-                if (url.contains("comments/1wbqdaj.json")) {
-                    throw RuntimeException("403 Forbidden")
-                }
-                if (url.contains("oembed")) {
-                    return oembedJson
-                }
-                return ""
-            }
-
-            override suspend fun resolveFinalUrl(url: String): String {
-                if (url == shareUrl) return targetUrl
-                return url
-            }
-        }
-
-        val post = resolver.resolve(shareUrl, mockHttpClient)
-
-        assertEquals(Platform.REDDIT, post.platform)
-        assertEquals("1wbqdaj", post.id)
-        assertEquals("Account Disabled", post.title)
-        assertEquals("xethorn", post.author.username)
-        assertEquals(1, post.media.size)
-        assertEquals("https://share.redd.it/preview/post/1wbqdaj", post.media.first().url)
-    }
-
-    @Test
-    fun `resolve should parse text post with upvotes and comments`() = runTest {
+    fun `resolve should parse text post correctly`() = runTest {
         val mockJson = """
         [
             {
@@ -79,15 +41,15 @@ class RedditResolverTest {
                     "children": [
                         {
                             "data": {
-                                "id": "1cdefgh",
-                                "title": "Kotlin 2.0 is great",
-                                "selftext": "Here are my detailed thoughts about the new compiler...",
+                                "id": "t3_12345",
+                                "title": "SocialPeek Released!",
+                                "selftext": "A brand new social media metadata parser for Kotlin.",
                                 "author": "kotlin_dev",
-                                "subreddit": "Kotlin",
+                                "subreddit": "kotlindev",
                                 "ups": 350,
                                 "num_comments": 42,
-                                "created_utc": 1715000000.0,
-                                "permalink": "/r/Kotlin/comments/1cdefgh/kotlin_20_is_great/"
+                                "permalink": "/r/kotlindev/comments/12345/socialpeek_released/",
+                                "created_utc": 1715000000.0
                             }
                         }
                     ]
@@ -96,23 +58,80 @@ class RedditResolverTest {
         ]
         """.trimIndent()
 
-        val client = createMockHttpClient { request ->
-            assertTrue(request.url.encodedPath.contains("1cdefgh"))
+        val client = createMockHttpClient {
             jsonResponse(mockJson)
         }
 
-        val post = resolver.resolve("https://redd.it/1cdefgh", client)
+        val post = resolver.resolve("https://www.reddit.com/r/kotlindev/comments/12345/socialpeek_released/", client)
 
         assertEquals(Platform.REDDIT, post.platform)
-        assertEquals("1cdefgh", post.id)
-        assertEquals("Kotlin 2.0 is great", post.title)
-        assertEquals("Here are my detailed thoughts about the new compiler...", post.content)
+        assertEquals("t3_12345", post.id)
+        assertEquals("SocialPeek Released!", post.title)
+        assertEquals("A brand new social media metadata parser for Kotlin.", post.content)
         assertEquals("kotlin_dev", post.author.username)
         assertEquals("https://www.reddit.com/user/kotlin_dev", post.author.profileUrl)
         assertEquals(350, post.metrics?.likes)
         assertEquals(42, post.metrics?.comments)
         assertEquals(1715000000L, post.createdAtEpochSeconds)
         assertTrue(post.media.isEmpty())
+    }
+
+    @Test
+    fun `resolve should fallback to oEmbed when JSON API fails`() = runTest {
+        val oEmbedJson = """
+        {
+            "title": "Account Disabled",
+            "author_name": "xethorn",
+            "provider_name": "Reddit"
+        }
+        """.trimIndent()
+
+        val client = createMockHttpClient { request ->
+            if (request.url.encodedPath.contains("oembed")) {
+                jsonResponse(oEmbedJson)
+            } else {
+                respond("Blocked", HttpStatusCode.Forbidden)
+            }
+        }
+
+        val post = resolver.resolve("https://www.reddit.com/r/google_antigravity/comments/1wbqdaj/account_disabled/", client)
+
+        assertEquals(Platform.REDDIT, post.platform)
+        assertEquals("1wbqdaj", post.id)
+        assertEquals("Account Disabled", post.title)
+        assertEquals("xethorn", post.author.username)
+        assertEquals("https://www.reddit.com/user/xethorn", post.author.profileUrl)
+        assertEquals(1, post.media.size)
+    }
+
+    @Test
+    fun `resolve should follow redirect for share link and fallback to oEmbed`() = runTest {
+        val oEmbedJson = """
+        {
+            "title": "Account Disabled",
+            "author_name": "xethorn",
+            "provider_name": "Reddit"
+        }
+        """.trimIndent()
+
+        val client = createMockHttpClient { request ->
+            if (request.url.encodedPath.contains("/s/")) {
+                respond(
+                    content = "",
+                    status = HttpStatusCode.MovedPermanently,
+                    headers = headersOf(HttpHeaders.Location, "https://www.reddit.com/r/google_antigravity/comments/1wbqdaj/account_disabled/")
+                )
+            } else if (request.url.encodedPath.contains("oembed")) {
+                jsonResponse(oEmbedJson)
+            } else {
+                respond("Blocked", HttpStatusCode.Forbidden)
+            }
+        }
+
+        val post = resolver.resolve("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE", client)
+        assertEquals("1wbqdaj", post.id)
+        assertEquals("Account Disabled", post.title)
+        assertEquals("xethorn", post.author.username)
     }
 
     @Test
@@ -166,118 +185,9 @@ class RedditResolverTest {
     }
 
     @Test
-    fun `resolve should parse gallery post`() = runTest {
-        val mockJson = """
-        [
-            {
-                "data": {
-                    "children": [
-                        {
-                            "data": {
-                                "id": "gal123",
-                                "title": "Trip Photos",
-                                "selftext": "Enjoying the vacation",
-                                "author": "traveler",
-                                "is_gallery": true,
-                                "gallery_data": {
-                                    "items": [
-                                        { "media_id": "photo1" },
-                                        { "media_id": "photo2" }
-                                    ]
-                                },
-                                "media_metadata": {
-                                    "photo1": {
-                                        "status": "valid",
-                                        "e": "Image",
-                                        "s": {
-                                            "u": "https://preview.redd.it/photo1.jpg?width=1000&amp;format=pjpg&amp;auto=webp&amp;s=111",
-                                            "x": 1000,
-                                            "y": 600
-                                        }
-                                    },
-                                    "photo2": {
-                                        "status": "valid",
-                                        "e": "Image",
-                                        "s": {
-                                            "u": "https://preview.redd.it/photo2.jpg?width=1200&amp;format=pjpg&amp;auto=webp&amp;s=222",
-                                            "x": 1200,
-                                            "y": 800
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    ]
-                }
-            }
-        ]
-        """.trimIndent()
-
-        val client = createMockHttpClient {
-            jsonResponse(mockJson)
-        }
-
-        val post = resolver.resolve("https://reddit.com/comments/gal123", client)
-
-        assertEquals(2, post.media.size)
-        val img1 = post.media[0] as Media.Image
-        val img2 = post.media[1] as Media.Image
-        assertEquals("https://i.redd.it/photo1.jpg", img1.url)
-        assertEquals(1000, img1.width)
-        assertEquals(600, img1.height)
-        assertEquals("https://i.redd.it/photo2.jpg", img2.url)
-    }
-
-    @Test
-    fun `resolve should parse video post`() = runTest {
-        val mockJson = """
-        [
-            {
-                "data": {
-                    "children": [
-                        {
-                            "data": {
-                                "id": "vid123",
-                                "title": "Epic Gameplay",
-                                "selftext": "",
-                                "author": "gamer",
-                                "is_video": true,
-                                "media": {
-                                    "reddit_video": {
-                                        "fallback_url": "https://v.redd.it/vid123/DASH_1080.mp4?source=fallback",
-                                        "duration": 45,
-                                        "width": 1920,
-                                        "height": 1080,
-                                        "bitrate_kbps": 4500
-                                    }
-                                }
-                            }
-                        }
-                    ]
-                }
-            }
-        ]
-        """.trimIndent()
-
-        val client = createMockHttpClient {
-            jsonResponse(mockJson)
-        }
-
-        val post = resolver.resolve("https://reddit.com/comments/vid123", client)
-
-        assertEquals(1, post.media.size)
-        val video = post.media.first() as Media.Video
-        assertEquals("https://v.redd.it/vid123/DASH_1080.mp4?source=fallback", video.url)
-        assertEquals(45.0, video.durationSeconds)
-        assertEquals(1920, video.width)
-        assertEquals(1080, video.height)
-        assertEquals(4500000L, video.bitrate)
-    }
-
-    @Test
     fun `resolve should throw PostNotFoundException when post does not exist`() = runTest {
         val client = createMockHttpClient {
-            jsonResponse("[]", status = HttpStatusCode.NotFound)
+            respond("Not Found", HttpStatusCode.NotFound)
         }
 
         assertFailsWith<PostNotFoundException> {

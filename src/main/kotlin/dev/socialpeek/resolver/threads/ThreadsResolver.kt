@@ -18,13 +18,27 @@ class ThreadsResolver : PlatformResolver {
         RegexOption.IGNORE_CASE
     )
 
+    private val threadsSharePattern = Regex(
+        """https?://(?:www\.)?threads\.(?:net|com)/share/([a-zA-Z0-9_-]+)""",
+        RegexOption.IGNORE_CASE
+    )
+
     override fun canResolve(url: String): Boolean {
-        return threadsUrlPattern.containsMatchIn(url)
+        return threadsUrlPattern.containsMatchIn(url) || threadsSharePattern.containsMatchIn(url)
     }
 
     override suspend fun resolve(url: String, client: SocialPeekHttpClient): PeekPost {
-        val match = threadsUrlPattern.find(url)
-            ?: throw ParsingException(url, "Could not extract Threads post ID from URL")
+        var currentUrl = url
+        if (threadsSharePattern.containsMatchIn(url)) {
+            currentUrl = try {
+                client.resolveFinalUrl(url, mapOf(HttpHeaders.UserAgent to KtorSocialPeekHttpClient.BOT_USER_AGENT))
+            } catch (e: Exception) {
+                url
+            }
+        }
+
+        val match = threadsUrlPattern.find(currentUrl)
+            ?: throw ParsingException(currentUrl, "Could not extract Threads post ID from URL: $currentUrl")
         
         val urlUsername = match.groupValues[1].takeIf { it.isNotBlank() }
         val postId = match.groupValues[2]
@@ -49,26 +63,20 @@ class ThreadsResolver : PlatformResolver {
 
         val doc = Jsoup.parse(html)
 
-        val title = doc.selectFirst("meta[property=og:title]")?.attr("content")
-        val desc = doc.selectFirst("meta[property=og:description]")?.attr("content") ?: ""
-        val ogVideo = doc.selectFirst("meta[property=og:video]")?.attr("content")
+        val ogTitle = doc.selectFirst("meta[property=og:title]")?.attr("content")
+        val ogDescription = doc.selectFirst("meta[property=og:description]")?.attr("content")
         val ogImage = doc.selectFirst("meta[property=og:image]")?.attr("content")
+        val ogVideo = doc.selectFirst("meta[property=og:video]")?.attr("content")
 
-        if (title.isNullOrBlank() && desc.isBlank() && ogImage.isNullOrBlank()) {
-            throw PostNotFoundException(url, "Threads post metadata not found")
+        if (ogTitle.isNullOrBlank() && ogDescription.isNullOrBlank() && ogImage.isNullOrBlank()) {
+            throw PostNotFoundException(url, "Threads post not found or empty response")
         }
 
-        val (extractedDisplayName, extractedUsername) = parseAuthorFromTitle(title)
-        val finalUsername = urlUsername ?: extractedUsername ?: "threads_user"
-        val displayName = extractedDisplayName ?: finalUsername
+        val (username, displayName) = extractUser(ogTitle, urlUsername)
 
-        val author = Author(
-            username = finalUsername,
-            displayName = displayName,
-            profileUrl = "https://www.threads.net/@$finalUsername"
-        )
-
+        val content = ogDescription ?: ""
         val mediaList = mutableListOf<Media>()
+
         if (!ogVideo.isNullOrBlank()) {
             mediaList.add(
                 Media.Video(
@@ -85,33 +93,36 @@ class ThreadsResolver : PlatformResolver {
             )
         }
 
+        val author = Author(
+            username = username,
+            displayName = displayName ?: username,
+            avatarUrl = null,
+            profileUrl = "https://www.threads.net/@$username"
+        )
+
         return PeekPost(
             platform = Platform.THREADS,
             id = postId,
-            originalUrl = targetUrl,
+            originalUrl = "https://www.threads.net/@$username/post/$postId",
             author = author,
-            content = desc,
+            content = content,
             media = mediaList
         )
     }
 
-    private fun parseAuthorFromTitle(title: String?): Pair<String?, String?> {
-        if (title.isNullOrBlank()) return Pair(null, null)
-        // Format example: "Mark Zuckerberg (@zuck) on Threads"
-        val withHandle = Regex("""^(.*?)\s*\(@([a-zA-Z0-9_.-]+)\)\s+on Threads""", RegexOption.IGNORE_CASE).find(title)
-        if (withHandle != null) {
-            val displayName = withHandle.groupValues[1].trim()
-            val handle = withHandle.groupValues[2].trim()
-            return Pair(displayName, handle)
+    private fun extractUser(ogTitle: String?, fallbackUsername: String?): Pair<String, String?> {
+        if (ogTitle.isNullOrBlank()) {
+            val u = fallbackUsername ?: "threads_user"
+            return u to u
         }
-
-        // Format example: "@zuck on Threads"
-        val onlyHandle = Regex("""^@([a-zA-Z0-9_.-]+)\s+on Threads""", RegexOption.IGNORE_CASE).find(title)
-        if (onlyHandle != null) {
-            val handle = onlyHandle.groupValues[1].trim()
-            return Pair(handle, handle)
+        val match = Regex("""^(.*?)\s*\(@([a-zA-Z0-9_.-]+)\)\s*on Threads""", RegexOption.IGNORE_CASE).find(ogTitle)
+        return if (match != null) {
+            val name = match.groupValues[1].trim()
+            val handle = match.groupValues[2].trim()
+            handle to (name.ifBlank { handle })
+        } else {
+            val u = fallbackUsername ?: "threads_user"
+            u to u
         }
-
-        return Pair(null, null)
     }
 }
