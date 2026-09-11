@@ -3,6 +3,7 @@ package dev.socialpeek.resolver.reddit
 import dev.socialpeek.exception.ParsingException
 import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.*
+import dev.socialpeek.network.KtorSocialPeekHttpClient
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
 import io.ktor.http.*
@@ -30,8 +31,12 @@ class RedditResolver : PlatformResolver {
 
     companion object {
         val REDDIT_HEADERS = mapOf(
-            HttpHeaders.UserAgent to "SocialPeek/1.0 (https://github.com/0oWoodenDooro0/SocialPeek)"
+            HttpHeaders.UserAgent to KtorSocialPeekHttpClient.BOT_USER_AGENT
         )
+
+        private val JsonElement?.asJsonObject: JsonObject? get() = this as? JsonObject
+        private val JsonElement?.asJsonArray: JsonArray? get() = this as? JsonArray
+        private val JsonElement?.asJsonPrimitive: JsonPrimitive? get() = this as? JsonPrimitive
     }
 
     override fun canResolve(url: String): Boolean {
@@ -59,13 +64,19 @@ class RedditResolver : PlatformResolver {
             "https://www.reddit.com/comments/$postId/"
         }
 
-        // 1. Primary: Try direct JSON API
-        val jsonUrl = "https://www.reddit.com/comments/$postId.json"
-        try {
-            val responseText = client.get(jsonUrl, REDDIT_HEADERS)
-            return parseFromJson(responseText, postId, cleanUrl)
-        } catch (e: Exception) {
-            // Reddit may rate-limit (429), block, or require OAuth for JSON endpoint
+        // 1. Primary: Try direct JSON API via api.reddit.com or www.reddit.com
+        val jsonUrls = listOfNotNull(
+            if (urlSubreddit != null) "https://api.reddit.com/r/$urlSubreddit/comments/$postId" else null,
+            "https://api.reddit.com/comments/$postId",
+            "https://www.reddit.com/comments/$postId.json"
+        )
+        for (jsonUrl in jsonUrls) {
+            try {
+                val responseText = client.get(jsonUrl, REDDIT_HEADERS)
+                return parseFromJson(responseText, postId, cleanUrl)
+            } catch (_: Exception) {
+                // Try next endpoint
+            }
         }
 
         // 2. Fallback: oEmbed + Bot HTML scraping
@@ -104,25 +115,25 @@ class RedditResolver : PlatformResolver {
             throw PostNotFoundException(originalUrl, "Empty response from Reddit API")
         }
 
-        val listing = jsonArray[0].jsonObject
-        val children = listing["data"]?.jsonObject?.get("children")?.jsonArray
+        val listing = jsonArray[0].asJsonObject
+        val children = listing?.get("data")?.asJsonObject?.get("children")?.asJsonArray
         if (children.isNullOrEmpty()) {
             throw PostNotFoundException(originalUrl, "Post not found in Reddit listing")
         }
 
-        val postData = children[0].jsonObject["data"]?.jsonObject
+        val postData = children[0].asJsonObject?.get("data")?.asJsonObject
             ?: throw PostNotFoundException(originalUrl, "Post data missing")
 
-        val id = postData["id"]?.jsonPrimitive?.contentOrNull ?: fallbackPostId
-        val authorName = postData["author"]?.jsonPrimitive?.contentOrNull ?: "unknown"
-        val authorFullname = postData["author_fullname"]?.jsonPrimitive?.contentOrNull
-        val title = postData["title"]?.jsonPrimitive?.contentOrNull ?: "Reddit Post"
-        val selftext = postData["selftext"]?.jsonPrimitive?.contentOrNull ?: ""
-        val subreddit = postData["subreddit"]?.jsonPrimitive?.contentOrNull
-        val ups = postData["ups"]?.jsonPrimitive?.longOrNull
-        val numComments = postData["num_comments"]?.jsonPrimitive?.longOrNull
-        val createdUtc = postData["created_utc"]?.jsonPrimitive?.doubleOrNull?.toLong()
-        val permalink = postData["permalink"]?.jsonPrimitive?.contentOrNull
+        val id = postData["id"]?.asJsonPrimitive?.contentOrNull ?: fallbackPostId
+        val authorName = postData["author"]?.asJsonPrimitive?.contentOrNull ?: "unknown"
+        val authorFullname = postData["author_fullname"]?.asJsonPrimitive?.contentOrNull
+        val title = postData["title"]?.asJsonPrimitive?.contentOrNull ?: "Reddit Post"
+        val selftext = postData["selftext"]?.asJsonPrimitive?.contentOrNull ?: ""
+        val subreddit = postData["subreddit"]?.asJsonPrimitive?.contentOrNull
+        val ups = postData["ups"]?.asJsonPrimitive?.longOrNull
+        val numComments = postData["num_comments"]?.asJsonPrimitive?.longOrNull
+        val createdUtc = postData["created_utc"]?.asJsonPrimitive?.doubleOrNull?.toLong()
+        val permalink = postData["permalink"]?.asJsonPrimitive?.contentOrNull
 
         val author = Author(
             id = authorFullname,
@@ -134,21 +145,23 @@ class RedditResolver : PlatformResolver {
         val mediaList = mutableListOf<Media>()
 
         // Check for video (Reddit video or rich:video)
-        val isVideo = postData["is_video"]?.jsonPrimitive?.booleanOrNull ?: false
-        val redditVideo = postData["media"]?.jsonObject?.get("reddit_video")?.jsonObject
-        val secureMediaVideo = postData["secure_media"]?.jsonObject?.get("reddit_video")?.jsonObject
+        val isVideo = postData["is_video"]?.asJsonPrimitive?.booleanOrNull ?: false
+        val mediaObj = postData["media"]?.asJsonObject
+        val secureMediaObj = postData["secure_media"]?.asJsonObject
+        val redditVideo = mediaObj?.get("reddit_video")?.asJsonObject
+        val secureMediaVideo = secureMediaObj?.get("reddit_video")?.asJsonObject
         val videoObj = redditVideo ?: secureMediaVideo
 
         if (isVideo && videoObj != null) {
-            val fallbackUrl = videoObj["fallback_url"]?.jsonPrimitive?.contentOrNull
-            val hlsUrl = videoObj["hls_url"]?.jsonPrimitive?.contentOrNull
-            val duration = videoObj["duration"]?.jsonPrimitive?.doubleOrNull
-            val width = videoObj["width"]?.jsonPrimitive?.intOrNull
-            val height = videoObj["height"]?.jsonPrimitive?.intOrNull
+            val fallbackUrl = videoObj["fallback_url"]?.asJsonPrimitive?.contentOrNull
+            val hlsUrl = videoObj["hls_url"]?.asJsonPrimitive?.contentOrNull
+            val duration = videoObj["duration"]?.asJsonPrimitive?.doubleOrNull
+            val width = videoObj["width"]?.asJsonPrimitive?.intOrNull
+            val height = videoObj["height"]?.asJsonPrimitive?.intOrNull
 
-            val previewImages = postData["preview"]?.jsonObject?.get("images")?.jsonArray
-            val previewSource = previewImages?.firstOrNull()?.jsonObject?.get("source")?.jsonObject
-            val previewUrl = previewSource?.get("url")?.jsonPrimitive?.contentOrNull?.replace("&amp;", "&")
+            val previewImages = postData["preview"]?.asJsonObject?.get("images")?.asJsonArray
+            val previewSource = previewImages?.firstOrNull()?.asJsonObject?.get("source")?.asJsonObject
+            val previewUrl = previewSource?.get("url")?.asJsonPrimitive?.contentOrNull?.replace("&amp;", "&")
 
             val videoUrl = fallbackUrl ?: hlsUrl
             if (!videoUrl.isNullOrBlank()) {
@@ -164,21 +177,21 @@ class RedditResolver : PlatformResolver {
             }
         } else {
             // Check for gallery / multi-image
-            val isGallery = postData["is_gallery"]?.jsonPrimitive?.booleanOrNull ?: false
-            val galleryData = postData["gallery_data"]?.jsonObject?.get("items")?.jsonArray
-            val mediaMetadata = postData["media_metadata"]?.jsonObject
+            val isGallery = postData["is_gallery"]?.asJsonPrimitive?.booleanOrNull ?: false
+            val galleryData = postData["gallery_data"]?.asJsonObject?.get("items")?.asJsonArray
+            val mediaMetadata = postData["media_metadata"]?.asJsonObject
 
             if (mediaMetadata != null && (isGallery || galleryData != null || mediaMetadata.isNotEmpty())) {
-                val mediaIds = galleryData?.mapNotNull { it.jsonObject["media_id"]?.jsonPrimitive?.contentOrNull }
+                val mediaIds = galleryData?.mapNotNull { it.asJsonObject?.get("media_id")?.asJsonPrimitive?.contentOrNull }
                     ?: mediaMetadata.keys.toList()
 
                 mediaIds.forEach { mediaId ->
-                    val meta = mediaMetadata[mediaId]?.jsonObject
-                    val s = meta?.get("s")?.jsonObject
-                    val imgUrl = s?.get("u")?.jsonPrimitive?.contentOrNull?.replace("&amp;", "&")
-                        ?: s?.get("gif")?.jsonPrimitive?.contentOrNull?.replace("&amp;", "&")
-                    val width = s?.get("x")?.jsonPrimitive?.intOrNull
-                    val height = s?.get("y")?.jsonPrimitive?.intOrNull
+                    val meta = mediaMetadata[mediaId]?.asJsonObject
+                    val s = meta?.get("s")?.asJsonObject
+                    val imgUrl = s?.get("u")?.asJsonPrimitive?.contentOrNull?.replace("&amp;", "&")
+                        ?: s?.get("gif")?.asJsonPrimitive?.contentOrNull?.replace("&amp;", "&")
+                    val width = s?.get("x")?.asJsonPrimitive?.intOrNull
+                    val height = s?.get("y")?.asJsonPrimitive?.intOrNull
 
                     if (!imgUrl.isNullOrBlank() && !isPlatformPreviewOrAsset(imgUrl)) {
                         mediaList.add(
@@ -195,9 +208,9 @@ class RedditResolver : PlatformResolver {
 
             // If no gallery images found, check single image
             if (mediaList.isEmpty()) {
-                val postUrl = postData["url"]?.jsonPrimitive?.contentOrNull
-                val previewImages = postData["preview"]?.jsonObject?.get("images")?.jsonArray
-                val firstPreview = previewImages?.firstOrNull()?.jsonObject?.get("source")?.jsonObject
+                val postUrl = postData["url"]?.asJsonPrimitive?.contentOrNull
+                val previewImages = postData["preview"]?.asJsonObject?.get("images")?.asJsonArray
+                val firstPreview = previewImages?.firstOrNull()?.asJsonObject?.get("source")?.asJsonObject
 
                 if (postUrl != null && !isPlatformPreviewOrAsset(postUrl) && (
                         postUrl.contains("i.redd.it") ||
@@ -205,12 +218,12 @@ class RedditResolver : PlatformResolver {
                         postUrl.endsWith(".jpg") || postUrl.endsWith(".jpeg") ||
                         postUrl.endsWith(".png") || postUrl.endsWith(".webp")
                     )) {
-                    val width = firstPreview?.get("width")?.jsonPrimitive?.intOrNull
-                    val height = firstPreview?.get("height")?.jsonPrimitive?.intOrNull
+                    val width = firstPreview?.get("width")?.asJsonPrimitive?.intOrNull
+                    val height = firstPreview?.get("height")?.asJsonPrimitive?.intOrNull
                     mediaList.add(
                         Media.Image(
                             url = postUrl,
-                            previewUrl = firstPreview?.get("url")?.jsonPrimitive?.contentOrNull?.replace("&amp;", "&") ?: postUrl,
+                            previewUrl = firstPreview?.get("url")?.asJsonPrimitive?.contentOrNull?.replace("&amp;", "&") ?: postUrl,
                             width = width,
                             height = height
                         )
@@ -221,8 +234,6 @@ class RedditResolver : PlatformResolver {
 
         val rawMap = mutableMapOf<String, String>()
         if (subreddit != null) {
-            rawMap["subreddit"] = subreddit
-            rawMap["board"] = subreddit
             rawMap["community"] = subreddit
         }
 
@@ -260,11 +271,11 @@ class RedditResolver : PlatformResolver {
         val oembedUrl = "https://www.reddit.com/oembed?url=$cleanUrl"
         try {
             val oembedText = client.get(oembedUrl, REDDIT_HEADERS)
-            val oembedJson = json.parseToJsonElement(oembedText).jsonObject
-            oembedTitle = oembedJson["title"]?.jsonPrimitive?.contentOrNull
-            authorName = oembedJson["author_name"]?.jsonPrimitive?.contentOrNull
+            val oembedJson = json.parseToJsonElement(oembedText).asJsonObject
+            oembedTitle = oembedJson?.get("title")?.asJsonPrimitive?.contentOrNull
+            authorName = oembedJson?.get("author_name")?.asJsonPrimitive?.contentOrNull
 
-            val html = oembedJson["html"]?.jsonPrimitive?.contentOrNull
+            val html = oembedJson?.get("html")?.asJsonPrimitive?.contentOrNull
             if (html != null && foundSubreddit == null) {
                 val subMatch = Regex("""/r/([a-zA-Z0-9_]+)/""").find(html)
                 if (subMatch != null) {
@@ -339,8 +350,8 @@ class RedditResolver : PlatformResolver {
         val finalTitle = oembedTitle ?: scrapedTitle
         val finalAuthorName = authorName ?: "reddit_user"
 
-        if (finalTitle.isNullOrBlank() && scrapedContent.isBlank() && authorName == null) {
-            throw PostNotFoundException(cleanUrl, "Post not found or inaccessible on Reddit")
+        if (scrapedTitle == null && oembedTitle == null) {
+            throw PostNotFoundException(cleanUrl, "Reddit post not found or could not be resolved: $cleanUrl")
         }
 
         val author = Author(
@@ -370,8 +381,6 @@ class RedditResolver : PlatformResolver {
 
         val rawMap = mutableMapOf<String, String>()
         if (foundSubreddit != null) {
-            rawMap["subreddit"] = foundSubreddit
-            rawMap["board"] = foundSubreddit
             rawMap["community"] = foundSubreddit
         }
 
@@ -383,7 +392,9 @@ class RedditResolver : PlatformResolver {
             title = finalTitle ?: "Reddit Post",
             content = scrapedContent,
             media = mediaList,
-            metrics = Metrics(likes = scrapedVotes, comments = scrapedComments),
+            metrics = if (scrapedVotes != null || scrapedComments != null) {
+                Metrics(likes = scrapedVotes, comments = scrapedComments)
+            } else null,
             community = foundSubreddit,
             rawData = rawMap
         )

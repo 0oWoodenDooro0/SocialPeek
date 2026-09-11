@@ -1,5 +1,6 @@
 package dev.socialpeek
 
+import dev.socialpeek.model.Media
 import dev.socialpeek.model.Platform
 import dev.socialpeek.resolver.bilibili.BilibiliResolver
 import dev.socialpeek.resolver.instagram.InstagramResolver
@@ -7,6 +8,7 @@ import dev.socialpeek.resolver.reddit.RedditResolver
 import dev.socialpeek.resolver.threads.ThreadsResolver
 import dev.socialpeek.resolver.x.XResolver
 import dev.socialpeek.resolver.youtube.YouTubeResolver
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -49,5 +51,16 @@ class SocialPeekIntegrationTest {
         assertTrue(SocialPeek.canResolve("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE"))
         assertTrue(SocialPeek.canResolve("https://www.threads.com/share/BAENHoOpq1/"))
         assertTrue(SocialPeek.canResolve("https://www.youtube.com/live/SyG1rbuHB9A"))
+    }
+
+    @Test
+    fun `peek should resolve Reddit post with image`() = runTest {
+        val post = SocialPeek.peek("https://www.reddit.com/r/SaaS/comments/1wccqkh/someone_is_trying_really_hard_to_get_the_env_file/")
+        assertEquals(Platform.REDDIT, post.platform)
+        assertEquals("1wccqkh", post.id)
+        assertEquals("Little_Thanos", post.author.username)
+        assertTrue(post.media.isNotEmpty())
+        val image = post.media.first() as Media.Image
+        assertTrue(image.url.contains("fkhj9xodgnoh1"))
     }
 }
