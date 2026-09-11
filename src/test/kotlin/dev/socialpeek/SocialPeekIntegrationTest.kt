@@ -59,6 +59,9 @@ class SocialPeekIntegrationTest {
         assertEquals(Platform.REDDIT, post.platform)
         assertEquals("1wccqkh", post.id)
         assertEquals("Little_Thanos", post.author.username)
+        assertEquals("SaaS", post.community)
+        assertNotNull(post.communityIcon)
+        assertTrue(post.communityIcon.contains("communityIcon"))
         assertTrue(post.media.isNotEmpty())
         val image = post.media.first() as Media.Image
         assertTrue(image.url.contains("fkhj9xodgnoh1"))

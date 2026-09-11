@@ -73,7 +73,7 @@ class RedditResolver : PlatformResolver {
         for (jsonUrl in jsonUrls) {
             try {
                 val responseText = client.get(jsonUrl, REDDIT_HEADERS)
-                return parseFromJson(responseText, postId, cleanUrl)
+                return parseFromJson(responseText, postId, cleanUrl, client)
             } catch (_: Exception) {
                 // Try next endpoint
             }
@@ -101,7 +101,12 @@ class RedditResolver : PlatformResolver {
         return null
     }
 
-    private fun parseFromJson(jsonText: String, fallbackPostId: String, originalUrl: String): PeekPost {
+    private suspend fun parseFromJson(
+        jsonText: String,
+        fallbackPostId: String,
+        originalUrl: String,
+        client: SocialPeekHttpClient
+    ): PeekPost {
         val root = try {
             json.parseToJsonElement(jsonText)
         } catch (e: Exception) {
@@ -134,6 +139,8 @@ class RedditResolver : PlatformResolver {
         val numComments = postData["num_comments"]?.asJsonPrimitive?.longOrNull
         val createdUtc = postData["created_utc"]?.asJsonPrimitive?.doubleOrNull?.toLong()
         val permalink = postData["permalink"]?.asJsonPrimitive?.contentOrNull
+
+        val communityIcon = subreddit?.let { fetchSubredditIcon(it, client) }
 
         val author = Author(
             id = authorFullname,
@@ -236,6 +243,9 @@ class RedditResolver : PlatformResolver {
         if (subreddit != null) {
             rawMap["community"] = subreddit
         }
+        if (communityIcon != null) {
+            rawMap["community_icon"] = communityIcon
+        }
 
         val originalPostUrl = if (!permalink.isNullOrBlank()) {
             "https://www.reddit.com$permalink"
@@ -254,6 +264,7 @@ class RedditResolver : PlatformResolver {
             metrics = if (ups != null || numComments != null) Metrics(likes = ups, comments = numComments) else null,
             createdAtEpochSeconds = createdUtc,
             community = subreddit,
+            communityIcon = communityIcon,
             rawData = rawMap
         )
     }
@@ -293,6 +304,7 @@ class RedditResolver : PlatformResolver {
         var scrapedComments: Long? = null
         val scrapedImages = mutableListOf<String>()
         var scrapedVideo: String? = null
+        var scrapedCommunityIcon: String? = null
 
         try {
             val html = client.get(cleanUrl, REDDIT_HEADERS)
@@ -343,6 +355,9 @@ class RedditResolver : PlatformResolver {
 
             scrapedVideo = doc.selectFirst("meta[property=og:video]")?.attr("content")
                 ?: doc.selectFirst("meta[property=og:video:url]")?.attr("content")
+
+            val communityIconEl = doc.selectFirst("img[src*=\"communityIcon\"], img.shreddit-subreddit-icon__icon")
+            scrapedCommunityIcon = communityIconEl?.attr("src")?.replace("&amp;", "&")
         } catch (_: Exception) {
             // Ignore HTML scrape failure if oEmbed succeeded
         }
@@ -379,9 +394,14 @@ class RedditResolver : PlatformResolver {
             }
         }
 
+        val communityIcon = foundSubreddit?.let { fetchSubredditIcon(it, client) } ?: scrapedCommunityIcon
+
         val rawMap = mutableMapOf<String, String>()
         if (foundSubreddit != null) {
             rawMap["community"] = foundSubreddit
+        }
+        if (communityIcon != null) {
+            rawMap["community_icon"] = communityIcon
         }
 
         return PeekPost(
@@ -396,8 +416,23 @@ class RedditResolver : PlatformResolver {
                 Metrics(likes = scrapedVotes, comments = scrapedComments)
             } else null,
             community = foundSubreddit,
+            communityIcon = communityIcon,
             rawData = rawMap
         )
+    }
+
+    private suspend fun fetchSubredditIcon(subreddit: String, client: SocialPeekHttpClient): String? {
+        return try {
+            val aboutUrl = "https://api.reddit.com/r/$subreddit/about"
+            val responseText = client.get(aboutUrl, REDDIT_HEADERS)
+            val root = json.parseToJsonElement(responseText).asJsonObject
+            val dataObj = root?.get("data")?.asJsonObject
+            val icon = dataObj?.get("community_icon")?.asJsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+                ?: dataObj?.get("icon_img")?.asJsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            icon?.replace("&amp;", "&")?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun isPlatformPreviewOrAsset(url: String): Boolean {

@@ -303,6 +303,51 @@ class RedditResolverTest {
     }
 
     @Test
+    fun `resolve should extract communityIcon from subreddit about`() = runTest {
+        val mockJson = """
+        [
+            {
+                "data": {
+                    "children": [
+                        {
+                            "data": {
+                                "id": "t3_12345",
+                                "title": "SocialPeek Released!",
+                                "selftext": "A brand new social media metadata parser for Kotlin.",
+                                "author": "kotlin_dev",
+                                "subreddit": "kotlindev"
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+        """.trimIndent()
+
+        val mockAboutJson = """
+        {
+            "data": {
+                "community_icon": "https://styles.redditmedia.com/t5_123/styles/communityIcon_abc.png?width=256&amp;s=xyz"
+            }
+        }
+        """.trimIndent()
+
+        val client = createMockHttpClient { request ->
+            if (request.url.encodedPath.contains("/about")) {
+                jsonResponse(mockAboutJson)
+            } else {
+                jsonResponse(mockJson)
+            }
+        }
+
+        val post = resolver.resolve("https://www.reddit.com/r/kotlindev/comments/12345/socialpeek_released/", client)
+
+        assertEquals("kotlindev", post.community)
+        assertEquals("https://styles.redditmedia.com/t5_123/styles/communityIcon_abc.png?width=256&s=xyz", post.communityIcon)
+        assertEquals("https://styles.redditmedia.com/t5_123/styles/communityIcon_abc.png?width=256&s=xyz", post.rawData["community_icon"])
+    }
+
+    @Test
     fun `resolve should throw PostNotFoundException when post does not exist`() = runTest {
         val client = createMockHttpClient {
             respond("Not Found", HttpStatusCode.NotFound)
