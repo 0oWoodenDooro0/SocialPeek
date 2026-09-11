@@ -32,7 +32,7 @@ repositories {
 
 ```kotlin
 dependencies {
-    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.1.0")
+    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.2.0")
 }
 ```
 
@@ -99,7 +99,7 @@ suspend fun parse() {
 | **Threads** | `threads.net/@user/post/...`, `threads.com/share/...` | 作者、貼文內容、輪播圖片 (多張)、影片預覽 |
 | **Bilibili** | `bilibili.com/video/BV...`, `.../opus/...`, `b23.tv/...` | 標題、簡介、封面圖、作者名稱、播放/硬幣/彈幕等數據 |
 | **YouTube** | `youtube.com/watch?v=...`, `youtu.be/...`, `.../shorts/...`, `.../live/...` | 標題、作者/頻道名、縮圖、oEmbed 詮釋資料 |
-| **Reddit** | `reddit.com/r/.../comments/...`, `redd.it/...`, `reddit.com/r/.../s/...` (短網址分享) | 標題、內文 (Selftext)、多圖畫廊 (Gallery)、子版 (Subreddit)、點讚/留言數 |
+| **Reddit** | `reddit.com/r/.../comments/...`, `redd.it/...`, `reddit.com/r/.../s/...` (短網址分享) | 標題、內文 (Selftext)、多圖畫廊 (Gallery)、子版 (Subreddit)、看板圖示 (communityIcon)、點讚/留言數 |
 
 ---
 
