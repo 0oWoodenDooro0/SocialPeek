@@ -6,6 +6,7 @@ import dev.socialpeek.model.*
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
 import dev.socialpeek.resolver.util.MetaMediaExtractor
+import dev.socialpeek.util.UrlSanitizer
 import io.ktor.http.*
 import org.jsoup.Jsoup
 
@@ -131,10 +132,13 @@ class ThreadsResolver : PlatformResolver {
             profileUrl = "https://www.threads.net/@$username"
         )
 
+        val cleanUrl = UrlSanitizer.clean(targetUrl, Platform.THREADS)
+
         return PeekPost(
             platform = Platform.THREADS,
             id = postId,
-            originalUrl = "https://www.threads.net/@$username/post/$postId",
+            originalUrl = url,
+            cleanUrl = cleanUrl,
             author = author,
             content = content,
             media = mediaList

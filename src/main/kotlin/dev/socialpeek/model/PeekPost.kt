@@ -7,6 +7,7 @@ data class PeekPost(
     val platform: Platform,
     val id: String,
     val originalUrl: String,
+    val cleanUrl: String = originalUrl,
     val author: Author,
     val content: String,
     val title: String? = null,

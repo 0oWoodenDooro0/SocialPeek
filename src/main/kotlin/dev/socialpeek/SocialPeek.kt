@@ -4,6 +4,7 @@ import dev.socialpeek.model.PeekPost
 import dev.socialpeek.network.KtorSocialPeekHttpClient
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
+import dev.socialpeek.util.UrlSanitizer
 
 object SocialPeek {
 
@@ -28,6 +29,16 @@ object SocialPeek {
      * Checks if the default client can resolve the given [url].
      */
     fun canResolve(url: String): Boolean = defaultClient.canResolve(url)
+
+    /**
+     * Convenience method to clean a URL without making a network request.
+     */
+    fun cleanUrl(url: String): String = UrlSanitizer.clean(url)
+
+    /**
+     * Checks if the given URL contains known tracking/marketing parameters.
+     */
+    fun hasTrackingParams(url: String): Boolean = UrlSanitizer.hasTrackingParams(url)
 
     /**
      * Builder for custom [SocialPeekClient] instances.

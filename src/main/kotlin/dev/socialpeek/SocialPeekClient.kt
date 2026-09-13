@@ -11,6 +11,7 @@ import dev.socialpeek.resolver.reddit.RedditResolver
 import dev.socialpeek.resolver.threads.ThreadsResolver
 import dev.socialpeek.resolver.x.XResolver
 import dev.socialpeek.resolver.youtube.YouTubeResolver
+import dev.socialpeek.util.UrlSanitizer
 
 class SocialPeekClient(
     val resolvers: List<PlatformResolver> = defaultResolvers(),
@@ -62,4 +63,14 @@ class SocialPeekClient(
     fun findResolver(url: String): PlatformResolver? {
         return resolvers.firstOrNull { it.canResolve(url) }
     }
+
+    /**
+     * Cleans the URL by stripping tracking parameters.
+     */
+    fun cleanUrl(url: String): String = UrlSanitizer.clean(url)
+
+    /**
+     * Checks if the URL contains tracking parameters.
+     */
+    fun hasTrackingParams(url: String): Boolean = UrlSanitizer.hasTrackingParams(url)
 }

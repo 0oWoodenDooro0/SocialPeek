@@ -6,6 +6,7 @@ import dev.socialpeek.model.*
 import dev.socialpeek.network.KtorSocialPeekHttpClient
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
+import dev.socialpeek.util.UrlSanitizer
 import io.ktor.http.*
 import kotlinx.serialization.json.*
 import org.jsoup.Jsoup
@@ -58,7 +59,7 @@ class RedditResolver : PlatformResolver {
         val (urlSubreddit, postId) = extractSubredditAndPostId(currentUrl)
             ?: throw ParsingException(currentUrl, "Could not extract Reddit post ID from URL: $currentUrl")
 
-        val cleanUrl = if (urlSubreddit != null) {
+        val canonicalPathUrl = if (urlSubreddit != null) {
             "https://www.reddit.com/r/$urlSubreddit/comments/$postId/"
         } else {
             "https://www.reddit.com/comments/$postId/"
@@ -73,14 +74,14 @@ class RedditResolver : PlatformResolver {
         for (jsonUrl in jsonUrls) {
             try {
                 val responseText = client.get(jsonUrl, REDDIT_HEADERS)
-                return parseFromJson(responseText, postId, cleanUrl, client)
+                return parseFromJson(responseText, postId, originalUrl = url, currentUrl = currentUrl, client = client)
             } catch (_: Exception) {
                 // Try next endpoint
             }
         }
 
         // 2. Fallback: oEmbed + Bot HTML scraping
-        return resolveFallback(postId, cleanUrl, urlSubreddit, client)
+        return resolveFallback(postId, originalUrl = url, currentUrl = currentUrl, canonicalPathUrl = canonicalPathUrl, urlSubreddit = urlSubreddit, client = client)
     }
 
     private fun extractSubredditAndPostId(url: String): Pair<String?, String>? {
@@ -105,6 +106,7 @@ class RedditResolver : PlatformResolver {
         jsonText: String,
         fallbackPostId: String,
         originalUrl: String,
+        currentUrl: String,
         client: SocialPeekHttpClient
     ): PeekPost {
         val root = try {
@@ -247,16 +249,14 @@ class RedditResolver : PlatformResolver {
             rawMap["community_icon"] = communityIcon
         }
 
-        val originalPostUrl = if (!permalink.isNullOrBlank()) {
-            "https://www.reddit.com$permalink"
-        } else {
-            originalUrl
-        }
+        val targetUrl = if (currentUrl != originalUrl) currentUrl else (if (!permalink.isNullOrBlank()) "https://www.reddit.com$permalink" else originalUrl)
+        val cleanUrl = UrlSanitizer.clean(targetUrl, Platform.REDDIT)
 
         return PeekPost(
             platform = Platform.REDDIT,
             id = id,
-            originalUrl = originalPostUrl,
+            originalUrl = originalUrl,
+            cleanUrl = cleanUrl,
             author = author,
             title = title,
             content = selftext,
@@ -271,15 +271,17 @@ class RedditResolver : PlatformResolver {
 
     private suspend fun resolveFallback(
         postId: String,
-        cleanUrl: String,
-        initialSubreddit: String?,
+        originalUrl: String,
+        currentUrl: String,
+        canonicalPathUrl: String,
+        urlSubreddit: String?,
         client: SocialPeekHttpClient
     ): PeekPost {
         // 1. Try oEmbed
         var oembedTitle: String? = null
         var authorName: String? = null
-        var foundSubreddit: String? = initialSubreddit
-        val oembedUrl = "https://www.reddit.com/oembed?url=$cleanUrl"
+        var foundSubreddit: String? = initialSubreddit(urlSubreddit)
+        val oembedUrl = "https://www.reddit.com/oembed?url=$canonicalPathUrl"
         try {
             val oembedText = client.get(oembedUrl, REDDIT_HEADERS)
             val oembedJson = json.parseToJsonElement(oembedText).asJsonObject
@@ -307,7 +309,7 @@ class RedditResolver : PlatformResolver {
         var scrapedCommunityIcon: String? = null
 
         try {
-            val html = client.get(cleanUrl, REDDIT_HEADERS)
+            val html = client.get(canonicalPathUrl, REDDIT_HEADERS)
             val doc = Jsoup.parse(html)
 
             val ogTitle = doc.selectFirst("meta[property=og:title]")?.attr("content")
@@ -366,7 +368,7 @@ class RedditResolver : PlatformResolver {
         val finalAuthorName = authorName ?: "reddit_user"
 
         if (scrapedTitle == null && oembedTitle == null) {
-            throw PostNotFoundException(cleanUrl, "Reddit post not found or could not be resolved: $cleanUrl")
+            throw PostNotFoundException(canonicalPathUrl, "Reddit post not found or could not be resolved: $canonicalPathUrl")
         }
 
         val author = Author(
@@ -404,10 +406,13 @@ class RedditResolver : PlatformResolver {
             rawMap["community_icon"] = communityIcon
         }
 
+        val cleanUrl = UrlSanitizer.clean(currentUrl, Platform.REDDIT)
+
         return PeekPost(
             platform = Platform.REDDIT,
             id = postId,
-            originalUrl = cleanUrl,
+            originalUrl = originalUrl,
+            cleanUrl = cleanUrl,
             author = author,
             title = finalTitle ?: "Reddit Post",
             content = scrapedContent,
@@ -420,6 +425,8 @@ class RedditResolver : PlatformResolver {
             rawData = rawMap
         )
     }
+
+    private fun initialSubreddit(subreddit: String?): String? = subreddit
 
     private suspend fun fetchSubredditIcon(subreddit: String, client: SocialPeekHttpClient): String? {
         return try {

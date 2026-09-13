@@ -5,6 +5,7 @@ import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.*
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
+import dev.socialpeek.util.UrlSanitizer
 import kotlinx.serialization.json.*
 
 class XResolver : PlatformResolver {
@@ -160,6 +161,7 @@ class XResolver : PlatformResolver {
             platform = Platform.X,
             id = id,
             originalUrl = url,
+            cleanUrl = UrlSanitizer.clean(url, Platform.X),
             author = author,
             content = text,
             media = mediaList,

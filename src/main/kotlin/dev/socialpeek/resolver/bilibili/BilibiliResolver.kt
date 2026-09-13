@@ -5,6 +5,7 @@ import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.*
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
+import dev.socialpeek.util.UrlSanitizer
 import io.ktor.http.*
 import kotlinx.serialization.json.*
 
@@ -52,9 +53,9 @@ class BilibiliResolver : PlatformResolver {
         val opusMatch = opusPattern.find(currentUrl)
 
         return when {
-            bvMatch != null -> resolveVideo(bvid = bvMatch.groupValues[1], aid = null, originalUrl = currentUrl, client = client)
-            avMatch != null -> resolveVideo(bvid = null, aid = avMatch.groupValues[1], originalUrl = currentUrl, client = client)
-            opusMatch != null -> resolveOpus(opusId = opusMatch.groupValues[1], originalUrl = currentUrl, client = client)
+            bvMatch != null -> resolveVideo(bvid = bvMatch.groupValues[1], aid = null, originalUrl = url, currentUrl = currentUrl, client = client)
+            avMatch != null -> resolveVideo(bvid = null, aid = avMatch.groupValues[1], originalUrl = url, currentUrl = currentUrl, client = client)
+            opusMatch != null -> resolveOpus(opusId = opusMatch.groupValues[1], originalUrl = url, currentUrl = currentUrl, client = client)
             else -> throw ParsingException(currentUrl, "Unsupported Bilibili URL format: $currentUrl")
         }
     }
@@ -63,6 +64,7 @@ class BilibiliResolver : PlatformResolver {
         bvid: String?,
         aid: String?,
         originalUrl: String,
+        currentUrl: String,
         client: SocialPeekHttpClient
     ): PeekPost {
         val queryParam = if (bvid != null) "bvid=$bvid" else "aid=$aid"
@@ -128,10 +130,13 @@ class BilibiliResolver : PlatformResolver {
             )
         }
 
+        val cleanUrl = UrlSanitizer.clean(currentUrl, Platform.BILIBILI)
+
         return PeekPost(
             platform = Platform.BILIBILI,
             id = realBvid,
-            originalUrl = videoCanonicalUrl,
+            originalUrl = originalUrl,
+            cleanUrl = cleanUrl,
             author = author,
             title = title,
             content = desc,
@@ -150,6 +155,7 @@ class BilibiliResolver : PlatformResolver {
     private suspend fun resolveOpus(
         opusId: String,
         originalUrl: String,
+        currentUrl: String,
         client: SocialPeekHttpClient
     ): PeekPost {
         val apiUrl = "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=$opusId"
@@ -223,10 +229,13 @@ class BilibiliResolver : PlatformResolver {
         val comments = statModule?.get("comment")?.jsonObject?.get("count")?.jsonPrimitive?.longOrNull
         val reposts = statModule?.get("forward")?.jsonObject?.get("count")?.jsonPrimitive?.longOrNull
 
+        val cleanUrl = UrlSanitizer.clean(currentUrl, Platform.BILIBILI)
+
         return PeekPost(
             platform = Platform.BILIBILI,
             id = opusId,
-            originalUrl = "https://www.bilibili.com/opus/$opusId",
+            originalUrl = originalUrl,
+            cleanUrl = cleanUrl,
             author = author,
             title = opusTitle,
             content = descText,

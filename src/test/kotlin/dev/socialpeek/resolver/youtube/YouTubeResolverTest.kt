@@ -29,7 +29,7 @@ class YouTubeResolverTest {
     }
 
     @Test
-    fun `resolve should parse youtube video successfully`() = runTest {
+    fun `resolve should parse youtube video successfully and populate cleanUrl`() = runTest {
         val oembedJson = """
         {
             "title": "Rick Astley - Never Gonna Give You Up (Official Music Video)",
@@ -49,10 +49,12 @@ class YouTubeResolverTest {
             jsonResponse(oembedJson)
         }
 
-        val post = resolver.resolve("https://youtu.be/dQw4w9WgXcQ", client)
+        val post = resolver.resolve("https://youtu.be/dQw4w9WgXcQ?si=tracking123&t=30", client)
 
         assertEquals(Platform.YOUTUBE, post.platform)
         assertEquals("dQw4w9WgXcQ", post.id)
+        assertEquals("https://youtu.be/dQw4w9WgXcQ?si=tracking123&t=30", post.originalUrl)
+        assertEquals("https://youtu.be/dQw4w9WgXcQ?t=30", post.cleanUrl)
         assertEquals("Rick Astley - Never Gonna Give You Up (Official Music Video)", post.title)
         assertEquals("Rick Astley", post.author.displayName)
         assertEquals("RickAstleyYT", post.author.username)

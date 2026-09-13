@@ -11,7 +11,9 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SocialPeekDispatchTest {
 
@@ -55,5 +57,18 @@ class SocialPeekDispatchTest {
         val client = SocialPeekClient(resolvers = listOf(dummyResolver))
         val result = client.peekOrNull("https://unknown-platform.com/post/999")
         assertNull(result)
+    }
+
+    @Test
+    fun `SocialPeek facade should clean tracking URLs and detect tracking params`() {
+        val dirtyUrl = "https://x.com/user/status/123?s=20&t=abc&utm_source=share"
+        assertTrue(SocialPeek.hasTrackingParams(dirtyUrl))
+        val cleaned = SocialPeek.cleanUrl(dirtyUrl)
+        assertEquals("https://x.com/user/status/123", cleaned)
+        assertFalse(SocialPeek.hasTrackingParams(cleaned))
+
+        val client = SocialPeekClient()
+        assertTrue(client.hasTrackingParams(dirtyUrl))
+        assertEquals("https://x.com/user/status/123", client.cleanUrl(dirtyUrl))
     }
 }

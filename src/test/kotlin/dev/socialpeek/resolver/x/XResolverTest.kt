@@ -29,7 +29,7 @@ class XResolverTest {
     }
 
     @Test
-    fun `resolve should parse single image tweet correctly`() = runTest {
+    fun `resolve should parse single image tweet correctly and populate cleanUrl`() = runTest {
         val mockJson = """
         {
             "id_str": "1715438407489569064",
@@ -58,10 +58,12 @@ class XResolverTest {
             jsonResponse(mockJson)
         }
 
-        val post = resolver.resolve("https://x.com/elonmusk/status/1715438407489569064", client)
+        val post = resolver.resolve("https://x.com/elonmusk/status/1715438407489569064?s=20&t=abcdef", client)
 
         assertEquals(Platform.X, post.platform)
         assertEquals("1715438407489569064", post.id)
+        assertEquals("https://x.com/elonmusk/status/1715438407489569064?s=20&t=abcdef", post.originalUrl)
+        assertEquals("https://x.com/elonmusk/status/1715438407489569064", post.cleanUrl)
         assertEquals("Elon Musk", post.author.displayName)
         assertEquals("elonmusk", post.author.username)
         assertTrue(post.author.isVerified)

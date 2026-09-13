@@ -5,6 +5,7 @@ import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.*
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
+import dev.socialpeek.util.UrlSanitizer
 import kotlinx.serialization.json.*
 
 class YouTubeResolver : PlatformResolver {
@@ -71,7 +72,8 @@ class YouTubeResolver : PlatformResolver {
         return PeekPost(
             platform = Platform.YOUTUBE,
             id = videoId,
-            originalUrl = canonicalUrl,
+            originalUrl = url,
+            cleanUrl = UrlSanitizer.clean(url, Platform.YOUTUBE),
             author = author,
             title = title,
             content = title,

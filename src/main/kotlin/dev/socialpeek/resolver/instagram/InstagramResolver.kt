@@ -6,6 +6,7 @@ import dev.socialpeek.model.*
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
 import dev.socialpeek.resolver.util.MetaMediaExtractor
+import dev.socialpeek.util.UrlSanitizer
 import io.ktor.http.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -40,7 +41,7 @@ class InstagramResolver : PlatformResolver {
         try {
             val html = client.get(canonicalUrl, INSTAGRAM_HEADERS)
             val doc = Jsoup.parse(html)
-            val post = parseFromBotOpenGraph(shortcode, canonicalUrl, doc, html)
+            val post = parseFromBotOpenGraph(shortcode, url, canonicalUrl, doc, html)
             if (post != null) return post
         } catch (e: Exception) {
             // Fallback to embed
@@ -52,6 +53,7 @@ class InstagramResolver : PlatformResolver {
 
     private fun parseFromBotOpenGraph(
         shortcode: String,
+        originalUrl: String,
         canonicalUrl: String,
         doc: Document,
         html: String
@@ -125,10 +127,13 @@ class InstagramResolver : PlatformResolver {
             profileUrl = "https://www.instagram.com/$username/"
         )
 
+        val cleanUrl = UrlSanitizer.clean(if (originalUrl.contains("/share/")) canonicalUrl else originalUrl, Platform.INSTAGRAM)
+
         return PeekPost(
             platform = Platform.INSTAGRAM,
             id = shortcode,
-            originalUrl = canonicalUrl,
+            originalUrl = originalUrl,
+            cleanUrl = cleanUrl,
             author = author,
             content = content,
             media = mediaList,
@@ -209,10 +214,13 @@ class InstagramResolver : PlatformResolver {
             profileUrl = "https://www.instagram.com/$username/"
         )
 
+        val cleanUrl = UrlSanitizer.clean(if (originalUrl.contains("/share/")) canonicalUrl else originalUrl, Platform.INSTAGRAM)
+
         return PeekPost(
             platform = Platform.INSTAGRAM,
             id = shortcode,
-            originalUrl = canonicalUrl,
+            originalUrl = originalUrl,
+            cleanUrl = cleanUrl,
             author = author,
             content = content,
             media = mediaList
