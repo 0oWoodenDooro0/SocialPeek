@@ -93,6 +93,9 @@ class SocialPeekIntegrationTest {
         assertEquals("https://www.facebook.com/reel/832727859062012/", post.cleanUrl)
         assertFalse(post.cleanUrl.contains("share_url"))
         assertFalse(post.cleanUrl.contains("mibextid"))
+        assertEquals("League of Legends • 英雄联盟• Lolsea", post.author.displayName)
+        assertEquals("lolSEA2016", post.author.username)
+        assertEquals("https://www.facebook.com/lolSEA2016", post.author.profileUrl)
         assertTrue(post.media.isNotEmpty())
     }
 }

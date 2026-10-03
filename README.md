@@ -33,7 +33,7 @@ repositories {
 
 ```kotlin
 dependencies {
-    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.4.0")
+    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.4.1")
 }
 ```
 

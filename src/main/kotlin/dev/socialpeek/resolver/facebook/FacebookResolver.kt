@@ -1,12 +1,12 @@
 package dev.socialpeek.resolver.facebook
 
-import dev.socialpeek.exception.ParsingException
 import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.*
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
 import dev.socialpeek.util.UrlSanitizer
 import io.ktor.http.*
+import kotlinx.serialization.json.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 
@@ -82,6 +82,12 @@ class FacebookResolver : PlatformResolver {
         )
     }
 
+    private data class OEmbedAuthor(
+        val displayName: String?,
+        val username: String?,
+        val profileUrl: String?
+    )
+
     override fun canResolve(url: String): Boolean {
         val parsed = runCatching { Url(if (url.contains("://")) url else "https://$url") }.getOrNull()
             ?: return false
@@ -133,7 +139,74 @@ class FacebookResolver : PlatformResolver {
         }
 
         val doc = Jsoup.parse(html)
-        return parseHtml(doc, currentUrl, cleanTargetUrl, extractedId)
+        val oembedUrl = doc.selectFirst("link[rel=alternate][type='application/json+oembed']")?.attr("href")
+        val oembedAuthor = if (!oembedUrl.isNullOrBlank()) {
+            fetchOEmbedAuthor(client, oembedUrl)
+        } else {
+            null
+        }
+
+        return parseHtml(doc, currentUrl, cleanTargetUrl, extractedId, oembedAuthor)
+    }
+
+    private suspend fun fetchOEmbedAuthor(client: SocialPeekHttpClient, oembedUrl: String): OEmbedAuthor? {
+        val oembedTarget = extractOembedAuthorFromUrl(oembedUrl)
+        val jsonText = try {
+            client.get(oembedUrl, FACEBOOK_HEADERS)
+        } catch (_: Exception) {
+            return oembedTarget
+        }
+
+        val json = try {
+            Json.parseToJsonElement(jsonText).jsonObject
+        } catch (_: Exception) {
+            return oembedTarget
+        }
+
+        // Try to get author name and url from html field
+        val html = json["html"]?.jsonPrimitive?.contentOrNull
+        if (!html.isNullOrBlank()) {
+            val oembedDoc = Jsoup.parse(html)
+            val blockquote = oembedDoc.selectFirst("blockquote")
+            val authorLink = blockquote?.select("a")?.last()
+            if (authorLink != null) {
+                val authorUrl = authorLink.attr("href").takeIf { it.isNotBlank() }?.trimEnd('/')
+                val displayName = authorLink.text().takeIf { it.isNotBlank() }
+                val username = (authorUrl?.let { extractUsernameFromUrl(it) }) ?: oembedTarget?.username
+                if (displayName != null || username != null) {
+                    return OEmbedAuthor(
+                        displayName = displayName ?: username,
+                        username = username,
+                        profileUrl = authorUrl ?: username?.let { "https://www.facebook.com/$it" }
+                    )
+                }
+            }
+        }
+
+        val authorName = json["author_name"]?.jsonPrimitive?.contentOrNull
+        val authorUrl = json["author_url"]?.jsonPrimitive?.contentOrNull
+        if (!authorName.isNullOrBlank() || !authorUrl.isNullOrBlank()) {
+            val username = (authorUrl?.let { extractUsernameFromUrl(it) }) ?: oembedTarget?.username
+            return OEmbedAuthor(
+                displayName = authorName ?: username,
+                username = username,
+                profileUrl = authorUrl ?: username?.let { "https://www.facebook.com/$it" }
+            )
+        }
+
+        return oembedTarget
+    }
+
+    private fun extractOembedAuthorFromUrl(oembedUrl: String): OEmbedAuthor? {
+        val parsed = runCatching { Url(oembedUrl) }.getOrNull() ?: return null
+        val targetUrl = parsed.parameters["url"] ?: return null
+        val decodedTarget = runCatching { java.net.URLDecoder.decode(targetUrl, "UTF-8") }.getOrDefault(targetUrl)
+        val username = extractUsernameFromUrl(decodedTarget) ?: return null
+        return OEmbedAuthor(
+            displayName = username,
+            username = username,
+            profileUrl = "https://www.facebook.com/$username"
+        )
     }
 
     private fun isShareOrShortUrl(url: String): Boolean {
@@ -185,7 +258,8 @@ class FacebookResolver : PlatformResolver {
         doc: Document,
         originalUrl: String,
         cleanUrl: String,
-        fallbackId: String?
+        fallbackId: String?,
+        oembedAuthor: OEmbedAuthor? = null
     ): PeekPost {
         val ogTitle = doc.selectFirst("meta[property=og:title]")?.attr("content")
             ?: doc.selectFirst("meta[name=twitter:title]")?.attr("content")
@@ -230,14 +304,20 @@ class FacebookResolver : PlatformResolver {
         // Author & Title extraction
         val authorFromMeta = doc.selectFirst("meta[name=author]")?.attr("content")?.takeIf { it != "Facebook" }
         val community = extractCommunity(finalCleanUrl, ogTitle)
-        val (displayName, title, extractedAuthor) = parseTitleAndAuthor(ogTitle, authorFromMeta, originalUrl)
+        val (parsedDisplayName, title, extractedAuthor) = parseTitleAndAuthor(ogTitle, authorFromMeta, originalUrl)
 
-        val authorUsername = extractUsernameFromUrl(finalCleanUrl)
+        val displayName = oembedAuthor?.displayName
+            ?: (if (parsedDisplayName != "Facebook User") parsedDisplayName else (oembedAuthor?.username ?: "Facebook User"))
+
+        val authorUsername = oembedAuthor?.username
+            ?: extractUsernameFromUrl(finalCleanUrl)
             ?: extractUsernameFromUrl(ogUrl ?: "")
             ?: extractedAuthor
-            ?: displayName.lowercase().replace(Regex("""[^a-zA-Z0-9_.-]"""), "")
+            ?: displayName.takeIf { it != "Facebook User" }?.lowercase()?.replace(Regex("""[^a-zA-Z0-9_.-]"""), "")
+            ?: ""
 
-        val profileUrl = authorUsername.takeIf { it.isNotBlank() }?.let { "https://www.facebook.com/$it" }
+        val profileUrl = oembedAuthor?.profileUrl?.trimEnd('/')
+            ?: authorUsername.takeIf { it.isNotBlank() }?.let { "https://www.facebook.com/$it" }
 
         // Content
         val content = ogDescription ?: title ?: ""
@@ -325,8 +405,9 @@ class FacebookResolver : PlatformResolver {
         if (cleaned.contains(" | ")) {
             val parts = cleaned.split(" | ")
             val titlePart = parts.last().trim()
+            val cleanTitle = titlePart.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: titlePart
             val name = authorMeta ?: "Facebook User"
-            return Triple(name, titlePart.takeIf { it.isNotBlank() }, null)
+            return Triple(name, cleanTitle.takeIf { it.isNotBlank() }, null)
         }
 
         // Pattern 2: "Author Name in GroupName"

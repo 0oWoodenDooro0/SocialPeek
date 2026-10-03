@@ -210,13 +210,20 @@ class FacebookResolverTest {
         <html>
         <head>
             <meta property="og:type" content="video.other" />
-            <meta property="og:title" content="League Highlights | Facebook" />
-            <meta property="og:description" content="Incredible outplay in finals" />
+            <meta property="og:title" content="119K views · 633 reactions | 當前版本T1上路布蕾爾 | Facebook" />
+            <meta property="og:description" content="當前版本T1上路布蕾爾｜不需要任何操作！玩就上分！" />
             <meta property="og:image" content="https://scontent.xx.fbcdn.net/thumb.jpg" />
             <meta property="og:video" content="https://video.xx.fbcdn.net/reel.mp4" />
             <meta property="og:url" content="https://www.facebook.com/reel/832727859062012/" />
+            <link rel="alternate" type="application/json+oembed" href="https://graph.facebook.com/v26.0/oembed_video?url=https%3A%2F%2Fwww.facebook.com%2FlolSEA2016%2Fvideos%2F832727859062012%2F" />
         </head>
         </html>
+        """.trimIndent()
+
+        val oembedJson = """
+        {
+            "html": "<blockquote cite=\"https://www.facebook.com/lolSEA2016/videos/832727859062012/\"><a href=\"https://www.facebook.com/lolSEA2016/videos/832727859062012/\">布蕾爾</a>Posted by <a href=\"https://www.facebook.com/lolSEA2016\">League of Legends • 英雄联盟• Lolsea</a> on Thursday</blockquote>"
+        }
         """.trimIndent()
 
         val client = createMockHttpClient {
@@ -229,6 +236,11 @@ class FacebookResolverTest {
                         "https://www.facebook.com/reel/832727859062012/?share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2Fv%2F18L6FcWfXE%2F%3Fmibextid%3DwwXIfr&rdid=N4KhDE7UhnTStU5V"
                     )
                 )
+                "/v26.0/oembed_video" -> respond(
+                    content = oembedJson,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
                 else -> htmlResponse(reelHtml)
             }
         }
@@ -238,6 +250,9 @@ class FacebookResolverTest {
         assertEquals("https://www.facebook.com/reel/832727859062012/", post.cleanUrl)
         assertFalse(post.cleanUrl.contains("share_url"))
         assertFalse(post.cleanUrl.contains("mibextid"))
+        assertEquals("League of Legends • 英雄联盟• Lolsea", post.author.displayName)
+        assertEquals("lolSEA2016", post.author.username)
+        assertEquals("https://www.facebook.com/lolSEA2016", post.author.profileUrl)
     }
 
     @Test
