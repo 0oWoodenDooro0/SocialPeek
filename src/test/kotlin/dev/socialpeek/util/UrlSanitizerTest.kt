@@ -123,4 +123,39 @@ class UrlSanitizerTest {
         val cleanIgWithIndex = UrlSanitizer.clean(rawIgWithIndex)
         assertEquals("https://www.instagram.com/p/C123456/?img_index=2", cleanIgWithIndex)
     }
+
+    @Test
+    fun `8 Facebook tracking removal and functional parameter preservation`() {
+        // fbclid and mibextid removed, host normalized to www.facebook.com
+        val rawPost = "https://facebook.com/zuck/posts/pfbid123?fbclid=IwAR123&mibextid=ZbWKwL"
+        val cleanPost = UrlSanitizer.clean(rawPost)
+        assertEquals("https://www.facebook.com/zuck/posts/pfbid123/", cleanPost)
+
+        // Reel with share_url removed and trailing slash preserved
+        val rawReel = "https://www.facebook.com/reel/832727859062012/?share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2Fv%2F18L6FcWfXE%2F%3Fmibextid%3DwwXIfr"
+        val cleanReel = UrlSanitizer.clean(rawReel)
+        assertEquals("https://www.facebook.com/reel/832727859062012/", cleanReel)
+        assertTrue(UrlSanitizer.hasTrackingParams(rawReel))
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanReel))
+
+        // Photo with fbid preserved and tracking parameters removed
+        val rawPhoto = "https://www.facebook.com/photo.php?fbid=10153231379946729&set=a.123&__tn__=%2CO*F"
+        val cleanPhoto = UrlSanitizer.clean(rawPhoto)
+        assertEquals("https://www.facebook.com/photo.php?fbid=10153231379946729&set=a.123", cleanPhoto)
+
+        // Watch with v preserved and tracking removed
+        val rawWatch = "https://www.facebook.com/watch/?v=10153231379946729&ref=sharing&mibextid=wwXIfr"
+        val cleanWatch = UrlSanitizer.clean(rawWatch)
+        assertEquals("https://www.facebook.com/watch/?v=10153231379946729", cleanWatch)
+
+        // Permalink with story_fbid and id preserved, tracking removed
+        val rawPermalink = "https://m.facebook.com/permalink.php?story_fbid=12345&id=67890&substory_index=0&notif_t=feedback_reaction_generic"
+        val cleanPermalink = UrlSanitizer.clean(rawPermalink)
+        assertEquals("https://www.facebook.com/permalink.php?story_fbid=12345&id=67890", cleanPermalink)
+
+        assertTrue(UrlSanitizer.hasTrackingParams(rawPost))
+        assertTrue(UrlSanitizer.hasTrackingParams(rawPhoto))
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanPost))
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanPhoto))
+    }
 }

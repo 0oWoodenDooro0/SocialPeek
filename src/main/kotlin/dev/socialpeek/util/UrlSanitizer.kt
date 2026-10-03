@@ -15,6 +15,11 @@ object UrlSanitizer {
     )
 
     private val PLATFORM_BLACKLIST = mapOf(
+        Platform.FACEBOOK to setOf(
+            "mibextid", "share_url", "fs", "rdid", "sfnsn", "paipv", "eav", "feed_story_type",
+            "__tn__", "__cft__", "acontext", "epa", "entry_point", "extid", "notif_t", "notif_id",
+            "substory_index", "checkpoint_src"
+        ),
         Platform.X to setOf("s", "t", "cn", "ref_src", "ref_url"),
         Platform.INSTAGRAM to setOf("igsh"),
         Platform.THREADS to setOf("xmt", "s"),
@@ -31,6 +36,7 @@ object UrlSanitizer {
     )
 
     private val PLATFORM_WHITELIST = mapOf(
+        Platform.FACEBOOK to setOf("fbid", "story_fbid", "v", "id", "comment_id", "set"),
         Platform.INSTAGRAM to setOf("img_index"),
         Platform.BILIBILI to setOf("p", "t"),
         Platform.YOUTUBE to setOf("v", "t", "list", "index"),
@@ -86,6 +92,9 @@ object UrlSanitizer {
 
         // Normalize apex host for standard platforms
         when (builder.host.lowercase()) {
+            "facebook.com" -> builder.host = "www.facebook.com"
+            "fb.com" -> builder.host = "www.facebook.com"
+            "m.facebook.com" -> builder.host = "www.facebook.com"
             "instagram.com" -> builder.host = "www.instagram.com"
             "threads.net" -> builder.host = "www.threads.net"
             "bilibili.com" -> builder.host = "www.bilibili.com"
@@ -115,6 +124,11 @@ object UrlSanitizer {
         } else if (detectedPlatform == Platform.INSTAGRAM) {
             // Instagram canonical post URLs end with /
             if (builder.encodedPath.matches(Regex("""^/(?:p|reel|tv)/[^/]+$"""))) {
+                builder.encodedPath = "${builder.encodedPath}/"
+            }
+        } else if (detectedPlatform == Platform.FACEBOOK) {
+            // Facebook canonical reel/post URLs end with /
+            if (builder.encodedPath.matches(Regex("""^/(?:[^/]+/)?(?:reel|posts)/[^/]+$"""))) {
                 builder.encodedPath = "${builder.encodedPath}/"
             }
         }
@@ -183,6 +197,7 @@ object UrlSanitizer {
     private fun detectPlatformFromHost(host: String): Platform? {
         val h = host.lowercase()
         return when {
+            h == "facebook.com" || h.endsWith(".facebook.com") || h == "fb.com" || h.endsWith(".fb.com") || h == "fb.watch" || h.endsWith(".fb.watch") || h == "fb.me" || h.endsWith(".fb.me") -> Platform.FACEBOOK
             h == "bilibili.com" || h.endsWith(".bilibili.com") || h == "b23.tv" || h.endsWith(".b23.tv") -> Platform.BILIBILI
             h == "x.com" || h.endsWith(".x.com") || h == "twitter.com" || h.endsWith(".twitter.com") || h == "t.co" || h.endsWith(".t.co") -> Platform.X
             h == "instagram.com" || h.endsWith(".instagram.com") || h == "instagr.am" || h.endsWith(".instagr.am") -> Platform.INSTAGRAM

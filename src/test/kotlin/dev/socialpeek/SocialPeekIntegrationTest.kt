@@ -3,6 +3,7 @@ package dev.socialpeek
 import dev.socialpeek.model.Media
 import dev.socialpeek.model.Platform
 import dev.socialpeek.resolver.bilibili.BilibiliResolver
+import dev.socialpeek.resolver.facebook.FacebookResolver
 import dev.socialpeek.resolver.instagram.InstagramResolver
 import dev.socialpeek.resolver.reddit.RedditResolver
 import dev.socialpeek.resolver.threads.ThreadsResolver
@@ -11,6 +12,7 @@ import dev.socialpeek.resolver.youtube.YouTubeResolver
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -18,10 +20,11 @@ import kotlin.test.assertTrue
 class SocialPeekIntegrationTest {
 
     @Test
-    fun `default client should support all 6 platforms`() {
+    fun `default client should support all 7 platforms`() {
         val client = SocialPeek.defaultClient
 
-        assertEquals(6, client.resolvers.size)
+        assertEquals(7, client.resolvers.size)
+        assertTrue(client.resolvers.any { it is FacebookResolver })
         assertTrue(client.resolvers.any { it is BilibiliResolver })
         assertTrue(client.resolvers.any { it is XResolver })
         assertTrue(client.resolvers.any { it is InstagramResolver })
@@ -30,6 +33,10 @@ class SocialPeekIntegrationTest {
         assertTrue(client.resolvers.any { it is RedditResolver })
 
         // Check resolver routing
+        assertEquals(Platform.FACEBOOK, client.findResolver("https://www.facebook.com/zuck/posts/pfbid02517vL7rZ9kFq71k51aP6k4R7Y6oBw8m")?.platform)
+        assertEquals(Platform.FACEBOOK, client.findResolver("https://www.facebook.com/reel/10153231379946729")?.platform)
+        assertEquals(Platform.FACEBOOK, client.findResolver("https://fb.watch/m4abc123/")?.platform)
+        assertEquals(Platform.FACEBOOK, client.findResolver("https://www.facebook.com/share/p/123456/")?.platform)
         assertEquals(Platform.BILIBILI, client.findResolver("https://www.bilibili.com/video/BV1xx411c7mD")?.platform)
         assertEquals(Platform.X, client.findResolver("https://x.com/jack/status/20")?.platform)
         assertEquals(Platform.X, client.findResolver("https://x.com/i/status/2097593106510094458")?.platform)
@@ -46,6 +53,8 @@ class SocialPeekIntegrationTest {
 
     @Test
     fun `SocialPeek helper methods should work`() {
+        assertTrue(SocialPeek.canResolve("https://www.facebook.com/zuck/posts/pfbid02517vL7rZ9kFq71k51aP6k4R7Y6oBw8m"))
+        assertTrue(SocialPeek.canResolve("https://fb.watch/m4abc123/"))
         assertTrue(SocialPeek.canResolve("https://x.com/jack/status/20"))
         assertTrue(SocialPeek.canResolve("https://bilibili.com/opus/12345"))
         assertTrue(SocialPeek.canResolve("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE"))
@@ -65,5 +74,25 @@ class SocialPeekIntegrationTest {
         assertTrue(post.media.isNotEmpty())
         val image = post.media.first() as Media.Image
         assertTrue(image.url.contains("fkhj9xodgnoh1"))
+    }
+
+    @Test
+    fun `peek should resolve live Facebook video post`() = runTest {
+        val post = SocialPeek.peek("https://www.facebook.com/facebook/videos/10153231379946729/")
+        assertEquals(Platform.FACEBOOK, post.platform)
+        assertEquals("10153231379946729", post.id)
+        assertNotNull(post.author.displayName)
+        assertTrue(post.media.isNotEmpty())
+    }
+
+    @Test
+    fun `peek should resolve live Facebook share video link and produce clean reel url`() = runTest {
+        val post = SocialPeek.peek("https://www.facebook.com/share/v/18L6FcWfXE/?mibextid=wwXIfr")
+        assertEquals(Platform.FACEBOOK, post.platform)
+        assertEquals("832727859062012", post.id)
+        assertEquals("https://www.facebook.com/reel/832727859062012/", post.cleanUrl)
+        assertFalse(post.cleanUrl.contains("share_url"))
+        assertFalse(post.cleanUrl.contains("mibextid"))
+        assertTrue(post.media.isNotEmpty())
     }
 }
